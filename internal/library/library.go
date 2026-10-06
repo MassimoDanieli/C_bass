@@ -118,9 +118,18 @@ func (l *Library) Save(id string, result *project.Result) error {
 	return os.Rename(temporary, final)
 }
 
-// SaveProject stores the project again, after a change of fingering.
+// SaveProject stores the project again, after a change of fingering, of bars or of notes.
 func (l *Library) SaveProject(id string, p *project.Project) error {
-	return writeJSON(filepath.Join(l.Dir, id, "project.json"), p)
+	if err := writeJSON(filepath.Join(l.Dir, id, "project.json"), p); err != nil {
+		return err
+	}
+	var entry Entry
+	path := filepath.Join(l.Dir, id, "info.json")
+	if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &entry) == nil && entry.Notes != len(p.Events) {
+		entry.Notes = len(p.Events)
+		return writeJSON(path, entry)
+	}
+	return nil
 }
 
 // Load reads a recording back: its project, the bass alone and the rest without the bass.

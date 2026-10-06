@@ -12,7 +12,22 @@ Dal brano alla parte di basso, come programma a sé: niente browser, niente Java
 | **Finestra** (riproduzione a velocità variabile, tablatura che scorre, manico) | fatta, prima versione |
 | **Applicazione** per macOS (Apple Silicon) e Windows | si scarica dalla scheda Actions; manca l'installazione |
 
-Il motore dà gli stessi risultati di Manico 7.2.0: sul brano di prova (4:48) le 984 note e i 705 beat coincidono uno per uno.
+Il motore è nato come copia fedele di quello di Manico 7.2.0. La lettura delle note è stata poi rifatta (vedi sotto) e non coincide più con quella di Manico.
+
+### Quanto è precisa la lettura delle note
+
+Misurata contro uno spartito: una registrazione di 3:21 il cui basso è scritto in un file Guitar Pro (155 note), separata e letta dal programma.
+
+| | prima | adesso |
+|---|---|---|
+| note giuste | 148 | 155 |
+| ottava sbagliata | 5 | 0 |
+| nota sbagliata | 2 | 0 |
+| note in più (una nota spezzata in due, o inventata) | 39 | 0 |
+
+Quella registrazione è un basso sintetico, quindi facile. Su una linea pizzicata con ribattuti, ottave e note smorzate, da 90 a 170 BPM: dal 91–93% al 100%. Su un basso vero non c'è uno spartito con cui misurare; lì le note lette scendono da 846 a 687 perché non si spezzano più, e quelle sotto gli 80 ms da 131 a 62.
+
+Cosa è cambiato: l'altezza si legge dall'intera nota e non da ogni centesimo di secondo (un momento solo confonde facilmente un'ottava con l'altra); una nota non si spezza dove cambia solo il suo suono (una corda bassa che risuona perde la fondamentale); l'altezza si segue tra un semitono e l'altro, così un basso un po' calante o un fretless non sfarfalla tra due nomi e un glissato non lascia una nota a ogni tasto; il basso separato si misura contro il brano, così il fruscio che la separazione lascia dove il basso non c'è non diventa note.
 
 ## L'applicazione
 
@@ -25,7 +40,10 @@ Durante la riproduzione:
 - **velocità** dal 40% al 120% senza cambiare l'intonazione, e senza ribattere le note: l'attacco passa una volta sola, il tempo si recupera nella nota che suona;
 - **ripeti** da una battuta a un'altra;
 - volume separato per il **basso** e per **il resto**: basso a zero per suonarci sopra, il resto a zero per sentire solo il basso;
-- strumento a 4, 5 o 6 corde: la diteggiatura si ricalcola.
+- strumento a 4, 5 o 6 corde: la diteggiatura si ricalcola;
+- **stanghette** spostabili di un quarto, quando l'«uno» è stato sentito nel punto sbagliato;
+- una nota di cui il programma non è sicuro (smorzata, o brevissima) porta un **?**;
+- se nel brano il basso non c'è (una base per suonarci sopra), lo dice invece di inventare note.
 
 Tasti: spazio suona e ferma, ← → una battuta indietro e avanti, ↑ ↓ velocità, A e B inizio e fine della ripetizione, L la accende e la spegne, M basso muto, Esc torna all'elenco.
 
@@ -57,7 +75,7 @@ Legge MP3 e WAV.
 |---|---|
 | `internal/audio` | lettura di WAV e MP3, ricampionamento, scrittura WAV |
 | `internal/demucs` | separazione in batteria, basso, altro e voce: spettrogramma, rete (ONNX Runtime), ricostruzione |
-| `internal/transcribe` | le note: su un basso isolato si segue la nota (una tenuta è una nota sola), su un mix si cercano gli attacchi |
+| `internal/transcribe` | le note: su un basso isolato si segue la nota (una tenuta è una nota sola) e la sua altezza si legge dall'intera nota, non momento per momento; su un mix si cercano gli attacchi |
 | `internal/rhythm` | tempo e beat della registrazione, note sulla griglia dei sedicesimi, valori e legature |
 | `internal/fretboard` | accordature e diteggiatura |
 | `internal/tab` | tablatura in testo |
@@ -92,9 +110,9 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 ## English
 
-**Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It gives the same results as Manico 7.2.0: on the test track (4:48) all 984 notes and 705 beats match one for one. The window is in its first version; the applications for macOS (Apple Silicon) and Windows are built on every push and downloaded from the Actions tab, with no installer yet.
+**Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It began as a faithful port of Manico 7.2.0; the note reader has since been redone. Measured against a score (a 3:21 recording whose bass is written in a Guitar Pro file, 155 notes): 148 right, 5 an octave off, 2 wrong and 39 extra notes before; 155 right and none extra now. That recording is a synthetic bass, the easy case; on a plucked line with repeats, octaves and muted notes from 90 to 170 BPM it went from 91–93% to 100%. The pitch is now read from the whole note rather than frame by frame, a note is not split where only its sound changes, pitch is followed between semitones, and the separated bass is measured against the recording so that what is left of no bass is not read as notes. The window is in its first version; the applications for macOS (Apple Silicon) and Windows are built on every push and downloaded from the Actions tab, with no installer yet.
 
-**The application.** Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
+**The application.** Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. The bar lines can be moved by a beat, a note the reader is unsure of carries a question mark, and a recording with no bass in it is said to have none rather than given made-up notes. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
 
 **Command line.** `cbass -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. `cbass help` lists the options.
 

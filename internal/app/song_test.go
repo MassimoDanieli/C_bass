@@ -115,3 +115,27 @@ func TestAnotherInstrument(t *testing.T) {
 		}
 	}
 }
+
+func TestMovingTheBarLines(t *testing.T) {
+	s := testSong(t)
+	if got := s.bar(2.2); got != 1 {
+		t.Fatalf("2.2 s is in bar %d", got+1)
+	}
+	s.shiftBars(1) // the "one" is a beat later: 2.2 s is still in the bar before
+	if got := s.bar(2.2); got != 0 {
+		t.Fatalf("after moving the bar lines a beat on, 2.2 s is in bar %d", got+1)
+	}
+	if got := s.barStart(1); math.Abs(got-2.5) > 1e-6 {
+		t.Fatalf("the second bar starts at %f", got)
+	}
+	for i := 0; i < 3; i++ {
+		s.shiftBars(1)
+	}
+	if got := s.bar(2.2); got != 1 { // four beats on is where it started
+		t.Fatalf("after a whole bar round, 2.2 s is in bar %d", got+1)
+	}
+	s.shiftBars(-1)
+	if s.pulse.Downbeat != 3 {
+		t.Fatalf("a beat back from the first is the last: got %d", s.pulse.Downbeat)
+	}
+}

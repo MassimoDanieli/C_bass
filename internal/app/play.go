@@ -14,6 +14,10 @@ import (
 // pixelsPerBeat is how wide a beat is written.
 const pixelsPerBeat = 104
 
+// doubt is the confidence under which a note is shown as uncertain: its pitch was hard to
+// make out, as with a muted note or a very short one.
+const doubt = 0.65
+
 // playScreen is the recording being played: the tablature scrolling under a fixed line, the
 // neck with the note to play, and the controls.
 func (g *Game) playScreen(c *canvas) {
@@ -129,10 +133,29 @@ func (g *Game) playHeader(c *canvas, r rect, s *song, now float64) {
 // drawTab writes the tablature around the present moment. The page moves, the line where
 // to play stays still: a number reaches it when its note sounds.
 func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
+	// the bar lines can be moved by a beat, when the "one" was heard in the wrong place
+	shift := rect{r.x + r.w - 92, r.y + 8, 34, 26}
+	for i, by := range []int{-1, 1} {
+		if g.button(c, []string{"bars-back", "bars-on"}[i], rect{shift.x + float32(i)*40, shift.y, shift.w, shift.h}, []string{"‹", "›"}[i], quiet) {
+			s.shiftBars(by)
+			if err := g.lib.SaveProject(s.id, s.project); err != nil {
+				g.say(err.Error())
+			}
+		}
+	}
 	if !c.painting() {
 		return
 	}
 	c.round(r, 14, colPanel)
+	for i := range []int{-1, 1} {
+		g.button(c, []string{"bars-back", "bars-on"}[i], rect{shift.x + float32(i)*40, shift.y, shift.w, shift.h}, []string{"‹", "›"}[i], quiet)
+	}
+	c.label(g.t("stanghette", "bar lines"), shift.x-10, shift.y+13, 12, regular, colFaint, right)
+	if len(s.project.Events) == 0 {
+		c.label(g.t("In questo brano non c'è un basso.", "There is no bass in this recording."), r.x+r.w/2, r.y+r.h/2-14, 20, medium, colText, centre)
+		c.label(g.t("Non c'è niente da trascrivere: resta la base, da suonarci sopra.", "There is nothing to write out: what is left is the backing, to play along to."), r.x+r.w/2, r.y+r.h/2+16, 14, regular, colDim, centre)
+		return
+	}
 	strings := len(s.tuning.Open)
 	const gutter = 52
 	spacing := max(16, min(42, (r.h-48-66)/float32(strings-1)))
@@ -202,12 +225,20 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 			}
 			in.round(rect{x + width/2 + 5, y - 1.5, end - (x + width/2 + 5), 3}, 1.5, hold)
 		}
+		// a note the reader is not sure of says so
+		doubtful := event.Confidence > 0 && event.Confidence < doubt
 		if placed[i].Index == sounding {
 			in.round(rect{x - width/2 - 6, y - 12, width + 12, 24}, 7, colAccent)
 			in.label(text, x, y, 17, bold, colOnLight, centre)
 		} else {
 			in.fill(rect{x - width/2 - 3, y - 9, width + 6, 18}, colPanel)
+			if doubtful && event.End > now {
+				ink = colDim
+			}
 			in.label(text, x, y, 17, bold, ink, centre)
+		}
+		if doubtful {
+			in.label("?", x+width/2+5, y-9, 11, bold, colDim, centre)
 		}
 	}
 	g.drawValues(in, s, xOf, staffBottom, firstSlot, lastSlot, now, lineOf)

@@ -4,8 +4,6 @@
 package project
 
 import (
-	"fmt"
-
 	"github.com/MassimoDanieli/c_bass/internal/audio"
 	"github.com/MassimoDanieli/c_bass/internal/demucs"
 	"github.com/MassimoDanieli/c_bass/internal/fretboard"
@@ -24,7 +22,18 @@ type Project struct {
 	Frets    int                `json:"frets"`
 	Rhythm   *rhythm.Rhythm     `json:"rhythm,omitempty"`
 	Events   []transcribe.Event `json:"events"`
+	// Reader is the version of the note reader that wrote Events: see Reader.
+	Reader int `json:"reader,omitempty"`
 }
+
+// Reader is the current version of the note reader. A project written by an older one is
+// read again from its separated bass when it is opened: that takes a second, the separation
+// is not done again.
+//
+//	2: the pitch of a note is read from the whole of it; a note is not split where only its
+//	   sound changes; pitch is followed between semitones; what is left of a recording with
+//	   no bass is not read as notes.
+const Reader = 2
 
 // Options for Analyse. The zero value separates the bass and writes for a four-string bass.
 type Options struct {
@@ -107,15 +116,10 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 		result.Bass, result.Backing = stems["bass"], backing
 	}
 
-	events := transcribe.Transcribe(source, transcribe.Options{
-		Isolated: isolated, Sensitivity: options.Sensitivity,
-		Progress: func(done float64) { report(Step{Stage: ReadingNotes, Done: int64(done * 1000), Total: 1000}) },
-	})
-	if len(events) == 0 {
-		return nil, fmt.Errorf("no notes were found in %s", title)
-	}
 	tuning := fretboard.TuningFor(options.Tuning)
-	events = fretboard.Finger(events, tuning, options.Frets)
+	events := read(source, mix, isolated && options.Bass == nil, tuning, options.Frets, options.Sensitivity, func(done float64) {
+		report(Step{Stage: ReadingNotes, Done: int64(done * 1000), Total: 1000})
+	})
 	report(Step{Stage: NotesRead, Done: int64(len(events))})
 
 	pulse := rhythm.Analyse(mix, options.Beats)
@@ -127,17 +131,61 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 	}
 
 	result.Project = &Project{
+		Reader:  Reader,
 		Version: options.Version, Title: title, Duration: mix.Duration(), Source: map[bool]string{true: "bass", false: "mix"}[isolated],
 		Tuning: tuning.Key, Frets: options.Frets, Rhythm: pulse, Events: events,
 	}
 	return result, nil
 }
 
+// read finds the notes in a bass and chooses where to play them. A bass separated from a
+// recording is held against that recording: 34 dB under it there is no bass, only what the
+// separation left behind.
+func read(bass, mix *audio.Buffer, separated bool, tuning fretboard.Tuning, frets int, sensitivity float64, progress func(float64)) []transcribe.Event {
+	var floor float64
+	if separated {
+		floor = transcribe.Level(mix) * 0.02
+	}
+	events := transcribe.Transcribe(bass, transcribe.Options{
+		Isolated: bass != mix, Sensitivity: sensitivity, Floor: floor, Lowest: tuning.Open[0], Progress: progress,
+	})
+	events = fretboard.Finger(events, tuning, frets)
+	if events == nil {
+		events = []transcribe.Event{} // no bass in the recording: nothing to read, still something to play along to
+	}
+	return events
+}
+
+// Reread reads the notes of a separated recording again, with the reader of this version of
+// the program, keeping its bars and its instrument. It reports whether anything was done.
+func Reread(result *Result) bool {
+	p := result.Project
+	if p.Reader >= Reader || result.Bass == nil || result.Backing == nil {
+		return false
+	}
+	mix := &audio.Buffer{SampleRate: result.Bass.SampleRate, Channels: make([][]float32, len(result.Bass.Channels))}
+	for c := range mix.Channels {
+		mix.Channels[c] = make([]float32, min(result.Bass.Len(), result.Backing.Len()))
+		for i := range mix.Channels[c] {
+			mix.Channels[c][i] = result.Bass.Channels[c][i] + result.Backing.Channels[c][i]
+		}
+	}
+	frets := p.Frets
+	if frets <= 0 {
+		frets = 12
+	}
+	p.Events = read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, 0, nil)
+	p.Reader = Reader
+	return true
+}
+
 // Refinger chooses the fingering again, for another instrument or another reach.
 func (p *Project) Refinger(tuning string, frets int) {
 	t := fretboard.TuningFor(tuning)
 	p.Tuning, p.Frets = t.Key, frets
-	p.Events = fretboard.Finger(p.Events, t, frets)
+	if len(p.Events) > 0 {
+		p.Events = fretboard.Finger(p.Events, t, frets)
+	}
 }
 
 func separate(mix *audio.Buffer, options Options, report func(Step)) (demucs.Stems, error) {

@@ -392,6 +392,15 @@ func (g *Game) load(j *job, id string) (*song, error) {
 	if err != nil {
 		return nil, err
 	}
+	// read by an earlier version of the program: read again, from the bass already separated
+	if result.Project.Reader < project.Reader {
+		j.at(stageNotes, "", 0, 0)
+		if project.Reread(result) {
+			if err := g.lib.SaveProject(id, result.Project); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return newSong(id, result), nil
 }
 

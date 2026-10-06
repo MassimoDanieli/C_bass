@@ -92,6 +92,16 @@ func (s *song) coming(seconds float64) int {
 	return -1
 }
 
+// shiftBars moves every bar line by a beat, for when the "one" was heard in the wrong place.
+func (s *song) shiftBars(by int) {
+	s.pulse.Downbeat = ((s.pulse.Downbeat+by)%s.perBar + s.perBar) % s.perBar
+	s.project.Rhythm = s.pulse
+	s.write()
+	if s.loopOn {
+		s.applyLoop()
+	}
+}
+
 func (s *song) applyLoop() {
 	s.player.SetLoop(s.barStart(s.loopA), s.barStart(s.loopB+1), s.loopOn)
 }

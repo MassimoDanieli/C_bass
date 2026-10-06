@@ -159,6 +159,9 @@ func analyse(args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(result.Project.Events) == 0 && result.Bass == nil {
+		return fmt.Errorf("no notes were found in %s", filepath.Base(path))
+	}
 	if s.stems && result.Bass != nil {
 		if err := audio.WriteWAV(filepath.Join(out, name+".no-bass.wav"), result.Backing); err != nil {
 			failed = err
@@ -172,6 +175,9 @@ func analyse(args []string) error {
 		step("wrote the two recordings")
 	}
 
+	if len(result.Project.Events) == 0 {
+		return fmt.Errorf("there is no bass in %s: the recording without it is all there is", filepath.Base(path))
+	}
 	data, err := json.MarshalIndent(result.Project, "", " ")
 	if err != nil {
 		return err
