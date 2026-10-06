@@ -334,3 +334,40 @@ func TestAnotherKey(t *testing.T) {
 		t.Errorf("undone: moved by %d, played %d higher, first note %d, in %s", s.project.Transpose, s.player.Pitch(), s.project.Events[0].Midi, s.project.Key)
 	}
 }
+
+// Sections: one starts at the bar the player is in, can be renamed, repeated and removed,
+// and lasts until the next.
+func TestSections(t *testing.T) {
+	s := testSong(t) // 120 BPM in four: a bar every two seconds
+	if i := s.sectionAdd(0.5); i != 0 || s.project.Sections[0].Kind != "intro" || s.project.Sections[0].Start != 0 {
+		t.Fatalf("the first section: %d, %+v", i, s.project.Sections)
+	}
+	if i := s.sectionAdd(5); i != 1 || s.project.Sections[1].Kind != "verse" || math.Abs(s.project.Sections[1].Start-4) > 0.01 {
+		t.Fatalf("the second section: %d, %+v", i, s.project.Sections)
+	}
+	if i := s.sectionAdd(4.5); i != -1 {
+		t.Error("a second section was started on the same bar")
+	}
+	if i := s.sectionAdd(2.5); i != 1 || len(s.project.Sections) != 3 { // one in between goes in between
+		t.Fatalf("a section in between: %d, %+v", i, s.project.Sections)
+	}
+	s.sectionKind(1)
+	if got := s.project.Sections[1].Kind; got != "prechorus" {
+		t.Errorf("the name after verse is %s", got)
+	}
+	if s.sectionAt(3) != 1 || s.sectionAt(4.2) != 2 || math.Abs(s.sectionEnd(1)-4) > 0.01 || s.sectionEnd(2) != s.player.Duration() {
+		t.Errorf("at 3 s section %d, at 4.2 s section %d, the second ends at %.2f", s.sectionAt(3), s.sectionAt(4.2), s.sectionEnd(1))
+	}
+	s.sectionRepeat(1)
+	if !s.loopOn || s.loopA != 1 || s.loopB != 1 {
+		t.Errorf("repeating the second section repeats bars %d to %d", s.loopA+1, s.loopB+1)
+	}
+	s.sectionRemove(0)
+	if len(s.project.Sections) != 2 || s.project.Sections[0].Kind != "prechorus" {
+		t.Errorf("after removing the first: %+v", s.project.Sections)
+	}
+	s.undo()
+	if len(s.project.Sections) != 3 || s.project.Sections[0].Kind != "intro" {
+		t.Errorf("undone: %+v", s.project.Sections)
+	}
+}

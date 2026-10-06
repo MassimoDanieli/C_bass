@@ -382,6 +382,11 @@ func (g *Game) takeShot(target *ebiten.Image) {
 				g.menu = true
 			case "key":
 				g.song.moveKey(2)
+			case "sections":
+				g.song.sectionAdd(0)
+				g.song.sectionKind(g.song.sectionAdd(g.shotAt))
+				g.song.section = g.song.sectionAt(g.shotAt)
+				g.song.sectionAdd(g.shotAt + 12)
 			case "export":
 				for _, kind := range []string{"text", "musicxml", "midi", "pdf"} {
 					g.export(g.song, kind)

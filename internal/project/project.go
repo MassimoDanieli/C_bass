@@ -37,6 +37,9 @@ type Project struct {
 	// Transpose is how many semitones above the recording the part is written, and the
 	// recording played: the piece moved to another key.
 	Transpose int `json:"transpose,omitempty"`
+	// Sections are the parts of the piece, named by whoever plays it: where the verse
+	// starts, where the chorus. Each lasts until the next.
+	Sections []Section `json:"sections,omitempty"`
 	// BuiltIn marks a piece that came with the program.
 	BuiltIn bool `json:"builtIn,omitempty"`
 }
@@ -49,6 +52,17 @@ type Project struct {
 //	   sound changes; pitch is followed between semitones; what is left of a recording with
 //	   no bass is not read as notes.
 const Reader = 2
+
+// Section is a part of a piece: where it starts, in seconds, and what it is.
+type Section struct {
+	Start float64 `json:"start"`
+	Kind  string  `json:"kind"` // one of SectionKinds
+	// Name is the kind as written out for whoever reads the part, when that has been done.
+	Name string `json:"name,omitempty"`
+}
+
+// SectionKinds are the names a section can have, in the order they are offered.
+var SectionKinds = []string{"intro", "verse", "prechorus", "chorus", "bridge", "solo", "outro"}
 
 // Options for Analyse. The zero value separates the bass and writes for a four-string bass.
 type Options struct {

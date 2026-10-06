@@ -85,6 +85,11 @@ func (g *Game) helpParts() []part {
 			{"+½", t("sposta il battito di mezzo quarto, quando è stato seguito sui levare: lo senti dal metronomo che batte in mezzo", "moves the beat half a beat later, when it was followed on the off-beats: you hear it from the metronome clicking in between")},
 			{"÷2  ×2", t("contano il brano alla metà o al doppio del tempo: 87 o 174 è spesso questione di opinione", "count the piece at half or twice the tempo: 87 or 174 is often a matter of opinion")},
 		}},
+		{t("Sezioni", "Sections"), [][2]string{
+			{t("+ Sezione", "+ Section"), t("fa cominciare una sezione dalla battuta in cui ti trovi: strofa, ritornello, ponte… Dura fino alla prossima", "starts a section at the bar you are in: verse, chorus, bridge… It lasts until the next one")},
+			{"", t("Un clic sul nome di una sezione permette di cambiarlo, di ripetere la sezione intera o di toglierla. I nomi finiscono anche nel PDF, nel MusicXML e nel MIDI.", "Click the name of a section to change it, to repeat the whole section or to remove it. The names go into the PDF, the MusicXML and the MIDI as well.")},
+			{"[  ]", t("all'inizio della sezione, e alla prossima", "to the start of the section, and to the next")},
+		}},
 		{t("Strumento ed esportazione", "Instrument and export"), [][2]string{
 			{t("4, 5, 6 corde", "4, 5, 6 strings"), t("la diteggiatura si ricalcola per lo strumento scelto", "the fingering is worked out again for the instrument chosen")},
 			{t("primi tasti", "first frets"), t("tiene la mano vicino al capotasto dove la linea lo permette; «tutto il manico» la manda dove si sposta di meno", "keeps the hand near the nut where the line allows; \"whole neck\" sends it where it moves least")},

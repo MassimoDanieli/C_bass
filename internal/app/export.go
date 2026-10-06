@@ -55,21 +55,17 @@ func fileName(title string) string {
 // export writes the part to the Downloads folder in one of three forms, and says where.
 func (g *Game) export(s *song, kind string) {
 	title := g.titleOf(s.project.Title, s.project.Key)
+	named := *s.project
+	named.Title, named.Sections = title, g.named(s.project.Sections)
 	var data []byte
 	ending := ""
 	switch kind {
 	case "pdf":
-		copied := *s.project
-		copied.Title = title
-		data, ending = export.PDF(&copied, g.noteName), ".pdf"
+		data, ending = export.PDF(&named, g.noteName), ".pdf"
 	case "midi":
-		copied := *s.project
-		copied.Title = title
-		data, ending = export.MIDI(&copied), ".mid"
+		data, ending = export.MIDI(&named), ".mid"
 	case "musicxml":
-		copied := *s.project
-		copied.Title = title
-		data, ending = export.MusicXML(&copied), ".musicxml"
+		data, ending = export.MusicXML(&named), ".musicxml"
 	default:
 		data, ending = []byte(tab.Text(title, s.project.Events, s.pulse, s.tuning, 4)), ".tab.txt"
 	}

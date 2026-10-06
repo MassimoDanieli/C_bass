@@ -16,7 +16,7 @@ const ticks = 480
 // MIDI writes the part as a standard MIDI file that keeps the time of the recording: every
 // beat has the length it has there, so that in a sequencer the notes fall where the bass
 // plays them and the file lines up with the recording laid beside it from the start. The
-// bars, with any that have a length of their own, and the names of the chords are in it too.
+// bars, with any that have a length of their own, and the names of the sections and of the chords are in it too.
 func MIDI(p *project.Project) []byte {
 	pulse := p.Rhythm
 	if pulse == nil || len(pulse.Beats) < 2 || pulse.PerBar < 1 {
@@ -63,9 +63,16 @@ func MIDI(p *project.Project) []byte {
 			current = now
 		}
 	}
-	latin := false
+	// the sections as markers, which a sequencer shows along the top; the chords as text
+	for _, section := range p.Sections {
+		name := section.Name
+		if name == "" {
+			name = section.Kind
+		}
+		meta(tick(section.Start), 2, 0x06, []byte(name))
+	}
 	for _, chord := range p.Chords {
-		meta(tick(chord.Start), 2, 0x06, []byte(chord.Name(latin)))
+		meta(tick(chord.Start), 2, 0x01, []byte(chord.Name(false)))
 	}
 	add(0, 2, 0xc0, 33) // a fingered electric bass
 	for _, note := range p.Events {

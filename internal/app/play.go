@@ -148,10 +148,27 @@ func (g *Game) playKeys(s *song, now float64) {
 	case g.pressed(ebiten.KeySpace):
 		g.togglePlay(s, now)
 	case g.pressed(ebiten.KeyEscape):
-		if s.chord >= 0 {
+		switch {
+		case s.chord >= 0:
 			s.chord = -1
-		} else {
+		case s.section >= 0:
+			s.section = -1
+		default:
 			g.goHome()
+		}
+	case g.pressed(ebiten.KeyBracketLeft): // to the start of this section, or of the one before
+		at := s.sectionAt(now)
+		if at >= 0 && now-s.project.Sections[at].Start < 1 {
+			at--
+		}
+		if at >= 0 {
+			p.Seek(s.project.Sections[at].Start)
+		} else {
+			p.Seek(0)
+		}
+	case g.pressed(ebiten.KeyBracketRight):
+		if next := s.sectionAt(now) + 1; next < len(s.project.Sections) {
+			p.Seek(s.project.Sections[next].Start)
 		}
 	case g.pressed(ebiten.KeyArrowLeft):
 		bar := s.bar(now)
@@ -300,6 +317,20 @@ func (g *Game) chordX(c *canvas, s *song, v tabView, i int) float32 {
 	return max(x, min(edge, last))
 }
 
+// sectionPill is where the name of a section is written: on the row of the bar numbers, after
+// the number of the bar it starts on.
+func (g *Game) sectionPill(c *canvas, s *song, v tabView, i int) rect {
+	section := s.project.Sections[i]
+	bar := s.bar(section.Start + 0.01)
+	x := v.xOf(float64(s.pulse.BarStart(bar))) - lead + 5
+	number := fmt.Sprint(bar + 1)
+	if beats := s.pulse.BeatsIn(bar); beats != s.perBar {
+		number += fmt.Sprintf("   %d/4", beats)
+	}
+	x += c.width(number, 12, medium) + 8
+	return rect{x, v.staffTop - 26, c.width(g.sectionName(section.Kind), 11, medium) + 16, 18}
+}
+
 func (v tabView) xOf(beats float64) float32 { return v.head + float32((beats-v.page)*pixelsPerBeat) }
 func (v tabView) beatsAt(x float32) float64 { return v.page + float64((x-v.head)/pixelsPerBeat) }
 func (v tabView) lineOf(str int) float32    { return v.staffBottom - float32(str)*v.spacing }
@@ -345,10 +376,15 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 	// a click on the page: on a chord, on a note, or on an empty place to go there
 	if zone := (rect{r.x + v.gutter, v.chordsY - 12, r.w - v.gutter - 8, v.staffBottom + 14 - (v.chordsY - 12)}); c.in != nil && c.in.pressed && zone.has(c.in.x, c.in.y) {
 		hit := false
+		for i := range s.project.Sections {
+			if g.sectionPill(c, s, v, i).has(c.in.x, c.in.y) {
+				s.section, s.chord, s.chosen, hit = i, -1, "", true
+			}
+		}
 		for i, chord := range s.project.Chords {
 			x := g.chordX(c, s, v, i)
-			if (rect{x - 6, v.chordsY - 12, c.width(chord.Name(!g.settings.English), 16, bold) + 12, 24}).has(c.in.x, c.in.y) {
-				s.chord, s.chosen, hit = i, "", true
+			if !hit && (rect{x - 6, v.chordsY - 12, c.width(chord.Name(!g.settings.English), 16, bold) + 12, 24}).has(c.in.x, c.in.y) {
+				s.chord, s.chosen, s.section, hit = i, "", -1, true
 			}
 		}
 		for i := from; !hit && i < len(placed) && placed[i].Slot <= lastSlot; i++ {
@@ -359,7 +395,7 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 				y = v.lineOf(event.String)
 			}
 			if (rect{x - 14, y - 13, 28, 26}).has(c.in.x, c.in.y) {
-				s.chosen, s.chord, hit = event.ID, -1, true
+				s.chosen, s.chord, s.section, hit = event.ID, -1, -1, true
 			}
 		}
 		if !hit {
@@ -405,6 +441,19 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 			}
 			in.label(text, x+5, staffTop-17, 12, medium, ink, left)
 		}
+	}
+	// where the sections start: their names beside the number of the bar
+	for i, section := range s.project.Sections {
+		pill := g.sectionPill(c, s, v, i)
+		if pill.x > r.x+r.w || pill.x+pill.w < r.x+v.gutter {
+			continue
+		}
+		back, ink := fade(colAccent, 0.16), colAccent
+		if i == s.section {
+			back, ink = colAccent, colOnLight
+		}
+		in.round(pill, 8, back)
+		in.label(g.sectionName(section.Kind), pill.x+8, pill.y+pill.h/2, 11, medium, ink, left)
 	}
 	// the chords, above
 	for i, chord := range s.project.Chords {
@@ -612,6 +661,22 @@ func (g *Game) editBar(c *canvas, v tabView, s *song, now float64) {
 			s.chosen = ""
 			changed = true
 		}
+	} else if s.section >= 0 && s.section < len(s.project.Sections) {
+		group(g.t("Sezione", "Section"))
+		if press("section-kind", g.sectionName(s.project.Sections[s.section].Kind)+"  ›", 150, plain) {
+			s.sectionKind(s.section)
+			changed = true
+		}
+		gap()
+		if press("section-repeat", g.t("Ripeti", "Repeat"), 80, plain) {
+			s.sectionRepeat(s.section)
+		}
+		gap()
+		if press("remove-section", g.t("Elimina", "Remove"), 76, plain) {
+			s.sectionRemove(s.section)
+			s.section = -1
+			changed = true
+		}
 	} else if s.chord >= 0 && s.chord < len(s.project.Chords) {
 		chord := s.project.Chords[s.chord]
 		group(g.t("Accordo", "Chord") + "  " + chord.Name(!g.settings.English))
@@ -646,22 +711,28 @@ func (g *Game) editBar(c *canvas, v tabView, s *song, now float64) {
 		if setting > 0 {
 			l = chosen
 		}
-		if x+190 < v.r.x+v.r.w-16-96-4-104-4-92-10 && press("repeats", text, 190, l) {
+		if x+190 < v.r.x+v.r.w-16-96-4-104-4-92-4-110-10 && press("repeats", text, 190, l) {
 			s.reread((setting + 1) % len(project.Sensitivities))
 			changed = true
 		}
 	}
 	// on the right, what is always there
-	x = v.r.x + v.r.w - 16 - 96 - 4 - 104 - 4 - 92
+	x = v.r.x + v.r.w - 16 - 96 - 4 - 104 - 4 - 92 - 4 - 110
 	if press("add-note", g.t("+ Nota", "+ Note"), 92, plain) {
 		if id := s.add(now); id != "" {
-			s.chosen, s.chord = id, -1
+			s.chosen, s.chord, s.section = id, -1, -1
 			changed = true
 		}
 	}
 	if press("add-chord", g.t("+ Accordo", "+ Chord"), 104, plain) {
 		if i := s.chordAdd(now); i >= 0 {
-			s.chord, s.chosen = i, ""
+			s.chord, s.chosen, s.section = i, "", -1
+			changed = true
+		}
+	}
+	if press("add-section", g.t("+ Sezione", "+ Section"), 110, plain) {
+		if i := s.sectionAdd(now); i >= 0 {
+			s.section, s.chord, s.chosen = i, -1, ""
 			changed = true
 		}
 	}
@@ -878,6 +949,16 @@ func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 	if s.loopOn && c.painting() && duration > 0 {
 		a, b := float32(s.barStart(s.loopA)/duration), float32(s.barStart(s.loopB+1)/duration)
 		c.round(rect{track.x + track.w*a, track.y - 2, max(3, track.w*(b-a)), 20}, 4, fade(colAccent2, 0.25))
+	}
+	if c.painting() && duration > 0 { // where the sections start
+		for i, section := range s.project.Sections {
+			x := track.x + track.w*float32(section.Start/duration)
+			ink := colFaint
+			if i == s.sectionAt(now) {
+				ink = colAccent
+			}
+			c.fill(rect{x - 0.75, track.y - 3, 1.5, 6}, ink)
+		}
 	}
 	fraction := 0.0
 	if duration > 0 {
