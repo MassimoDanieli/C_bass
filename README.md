@@ -160,7 +160,7 @@ Ogni push compila per macOS arm64, Windows x64 e Linux x64, e su ciascuna macchi
 
 ## Licenze
 
-Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati da Meta per Demucs, resi disponibili per uso personale e di ricerca; non fanno parte di questo repository. La finestra usa [Ebitengine](https://ebitengine.org) (Apache-2.0) e i caratteri Go (BSD).
+Il codice è GPL-3.0-or-later. Il modello che separa il basso non fa parte di questo repository e ha condizioni sue: da dove viene e come lo si può usare è scritto in [MODEL.md](MODEL.md). Per segnalare un problema o proporre una modifica: [CONTRIBUTING.md](CONTRIBUTING.md). La finestra usa [Ebitengine](https://ebitengine.org) (Apache-2.0) e i caratteri Go (BSD).
 
 ---
 
@@ -180,4 +180,4 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 **Build.** Go 1.26 and a C compiler; on Linux the window also needs the X11, OpenGL and ALSA headers listed in `.github/workflows/build.yml`. `go test ./...`, then `go build -o cbass ./cmd/cbass` and `go build -o cbass-app ./cmd/cbass-app`. Every push is built for macOS arm64, Windows x64 and Linux x64, and on each machine the whole program, model included, is tried on a recording made on the spot; then the application is built, opened on one of its built-in pieces with a picture of the window kept, and packed (disk image, Inno Setup installer from `packaging/C_bass.iss`, `.deb` and archive from `packaging/linux.sh`); each package is tried there: installed, started, removed. Run by hand with a version name, the build gathers the packages in a draft release.
 
-**Licences.** The code is GPL-3.0-or-later. The model weights derive from Meta's Demucs weights, made available for personal and research use; they are not part of this repository. The window uses [Ebitengine](https://ebitengine.org) (Apache-2.0) and the Go fonts (BSD).
+**Licences.** The code is GPL-3.0-or-later. The model that separates the bass is not part of this repository and has terms of its own: where it comes from and how it may be used is in [MODEL.md](MODEL.md). To report a problem or propose a change: [CONTRIBUTING.md](CONTRIBUTING.md). The window uses [Ebitengine](https://ebitengine.org) (Apache-2.0) and the Go fonts (BSD).

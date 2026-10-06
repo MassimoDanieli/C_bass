@@ -1,0 +1,33 @@
+name: Un brano letto male · A recording read wrongly
+description: Note, battute o accordi sbagliati · Wrong notes, bars or chords
+labels: [lettura]
+body:
+  - type: input
+    attributes:
+      label: Versione · Version
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Brano · Recording
+      description: Titolo e autore bastano. Non allegare musica protetta. · Title and artist are enough. Do not attach copyrighted music.
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Cosa è sbagliato · What is wrong
+      multiple: true
+      options:
+        - Note · Notes
+        - Note ribattute fuse o spezzate · Repeated notes merged or split
+        - Tempo o battute · Tempo or bars
+        - Accordi · Chords
+        - Il basso non viene trovato · The bass is not found
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Dove, cosa c'è scritto, cosa dovrebbe esserci · Where, what is written, what should be
+      description: Minuto e battuta, se puoi · Minute and bar, if you can
+    validations:
+      required: true

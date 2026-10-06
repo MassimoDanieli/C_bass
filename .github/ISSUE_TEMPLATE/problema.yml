@@ -1,0 +1,32 @@
+name: Qualcosa non funziona · Something does not work
+description: Un errore, un blocco, un comando che non fa quello che dice · An error, a crash, a control that does not do what it says
+labels: [problema]
+body:
+  - type: input
+    attributes:
+      label: Versione · Version
+      description: È nella pagina «Informazioni» · It is on the About page
+      placeholder: 0.9.0-beta.1
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Sistema · System
+      options:
+        - macOS (Apple Silicon)
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Cosa hai fatto e cosa è successo · What you did and what happened
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Registro · Log
+      description: >-
+        La schermata d'errore e la pagina «Informazioni» lo aprono. Contiene i titoli dei brani aperti: guardalo prima di incollarlo.
+        · The error screen and the About page open it. It holds the titles of the recordings you opened: look at it before pasting.
+      render: text

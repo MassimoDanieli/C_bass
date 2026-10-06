@@ -231,6 +231,7 @@ func (g *Game) aboutPage(whole, c *canvas, body rect) float32 {
 		{"about-source", t("Il codice su GitHub", "The code on GitHub"), homePage},
 		{"about-licence", t("La licenza", "The licence"), homePage + "/blob/main/LICENSE"},
 		{"about-report", t("Segnala un problema", "Report a problem"), issues},
+		{"about-model", t("Il modello", "The model"), homePage + "/blob/main/MODEL.md"},
 	})
 
 	heading(t("Aggiornamenti", "Updates"))
