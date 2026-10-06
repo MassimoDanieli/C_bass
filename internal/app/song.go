@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/MassimoDanieli/c_bass/internal/audio"
 	"math"
 	"sort"
 
@@ -16,6 +17,8 @@ type song struct {
 	id      string
 	project *project.Project
 	player  *player.Player
+	bass    *audio.Buffer // the two tracks, kept to read the notes again
+	backing *audio.Buffer
 	tuning  fretboard.Tuning
 	pulse   *rhythm.Rhythm
 	score   *rhythm.Score
@@ -32,7 +35,7 @@ type song struct {
 }
 
 func newSong(id string, result *project.Result) *song {
-	s := &song{id: id, project: result.Project, player: player.New(result.Bass, result.Backing), chord: -1}
+	s := &song{id: id, project: result.Project, player: player.New(result.Bass, result.Backing), chord: -1, bass: result.Bass, backing: result.Backing}
 	s.pulse = result.Project.Rhythm
 	if s.pulse == nil || len(s.pulse.Beats) < 2 || s.pulse.PerBar < 1 {
 		s.pulse = rhythm.Steady(120, result.Project.Duration, 4)

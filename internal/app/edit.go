@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/MassimoDanieli/c_bass/internal/project"
 	"math"
 	"sort"
 
@@ -16,11 +17,12 @@ import (
 
 // state is what a change can alter, kept so that the change can be undone.
 type state struct {
-	events   []transcribe.Event
-	chords   []chords.Chord
-	odd      []rhythm.OddBar
-	downbeat int
-	beats    []float64
+	events      []transcribe.Event
+	chords      []chords.Chord
+	odd         []rhythm.OddBar
+	downbeat    int
+	beats       []float64
+	sensitivity float64
 }
 
 // remember keeps the part as it is now, to come back to.
@@ -34,6 +36,7 @@ func (s *song) remember() {
 		append([]rhythm.OddBar(nil), s.pulse.Odd...),
 		s.pulse.Downbeat,
 		s.pulse.Beats, // never changed in place: a new pulse is made instead
+		s.project.Sensitivity,
 	})
 }
 
@@ -46,6 +49,7 @@ func (s *song) undo() bool {
 	s.history = s.history[:len(s.history)-1]
 	s.project.Events, s.project.Chords = last.events, last.chords
 	s.pulse.Odd, s.pulse.Downbeat, s.pulse.Beats = last.odd, last.downbeat, last.beats
+	s.project.Sensitivity = last.sensitivity
 	s.changed()
 	return true
 }
@@ -337,6 +341,37 @@ func (s *song) retempo(double bool) {
 	fresh := s.pulse.Rescale(double)
 	s.pulse.Beats, s.pulse.Downbeat, s.pulse.Odd = fresh.Beats, fresh.Downbeat, nil
 	s.loopOff()
+	s.changed()
+}
+
+// repeats says which of the reader's settings for notes struck again the part was read with.
+func (s *song) repeats() int {
+	for i, value := range project.Sensitivities {
+		if math.Abs(value-s.project.Sensitivity) < 0.005 {
+			return i
+		}
+	}
+	return 0
+}
+
+// reread reads the notes again from the bass, more or less ready to take a small rise in
+// level for a note struck again. Notes corrected by hand are read over with the rest; like
+// every other change, it can be taken back.
+func (s *song) reread(setting int) {
+	if s.bass == nil || s.backing == nil || setting < 0 || setting >= len(project.Sensitivities) {
+		return
+	}
+	s.remember()
+	s.project.Sensitivity = project.Sensitivities[setting]
+	if setting == 0 {
+		s.project.Sensitivity = 0
+	}
+	s.project.Events = project.ReadWith(s.bass, s.backing, s.project, s.project.Sensitivity)
+	for i := range s.project.Events {
+		s.made++
+		s.project.Events[i].ID = fmt.Sprintf("r-%d-%d", s.made, i)
+	}
+	s.chosen = ""
 	s.changed()
 }
 

@@ -75,6 +75,7 @@ func (g *Game) helpParts() []part {
 			{t("Maiusc ← →", "Shift ← →"), t("la sposta di un sedicesimo", "moves it by a sixteenth")},
 			{"−  =", t("la accorcia, la allunga", "shorter, longer")},
 			{t("Canc", "Delete"), t("la toglie", "removes it")},
+			{t("Ribattute", "Repeated notes"), t("rilegge le note dal basso, più o meno pronto a prendere per nuova una nota ribattuta: «di più» e «molte» quando di più note uguali ne è stata scritta una lunga", "reads the notes again from the bass, more or less ready to take a repeated note for a new one: \"more\" and \"most\" when several notes alike were written as one long one")},
 			{t("Cmd/Ctrl Z", "Cmd/Ctrl Z"), t("annulla l'ultima modifica (fino a cento)", "undoes the last change (up to a hundred)")},
 		}},
 		{t("Battute e tempo", "Bars and tempo"), [][2]string{

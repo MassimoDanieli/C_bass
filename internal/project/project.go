@@ -29,6 +29,9 @@ type Project struct {
 	Chords []chords.Chord `json:"chords"`
 	// Low keeps the fingering near the nut, where the line allows it.
 	Low bool `json:"lowPosition,omitempty"`
+	// Sensitivity is how readily the reader took a rise in level for a note struck again,
+	// when it is not the usual: see Sensitivities.
+	Sensitivity float64 `json:"sensitivity,omitempty"`
 	// Key of the piece as a pitch name, when it is known: the pieces that come with the program have one.
 	Key string `json:"key,omitempty"`
 	// BuiltIn marks a piece that came with the program.
@@ -181,6 +184,15 @@ func read(bass, mix *audio.Buffer, separated bool, tuning fretboard.Tuning, fret
 	return events
 }
 
+// Sensitivities are the three settings of the reader for notes struck again on the same
+// pitch. A note repeated without letting go hardly dips in level, less still once the bass
+// has been through the separation: the usual setting then writes one long note where several
+// were played. The others take a smaller rise for a new note. Measured on a song of straight
+// eighths, the middle one found 47 of 126 merged notes again and the last 64, with nothing
+// made up on the recordings there is a score for; on a real bass with no score they add
+// notes that cannot be told from splits without listening. Hence a choice, not a default.
+var Sensitivities = []float64{0.72, 0.80, 0.86}
+
 // Reread reads the notes of a separated recording again, with the reader of this version of
 // the program, keeping its bars and its instrument. It reports whether anything was done.
 func Reread(result *Result) bool {
@@ -194,6 +206,15 @@ func Reread(result *Result) bool {
 			return true
 		}
 	}
+	p.Events = ReadWith(result.Bass, result.Backing, p, p.Sensitivity)
+	p.Reader = Reader
+	return true
+}
+
+// ReadWith reads the notes of a separated bass for a project's instrument, with a
+// sensitivity to notes struck again (0 for the usual).
+func ReadWith(bass, backing *audio.Buffer, p *Project, sensitivity float64) []transcribe.Event {
+	result := &Result{Bass: bass, Backing: backing}
 	mix := &audio.Buffer{SampleRate: result.Bass.SampleRate, Channels: make([][]float32, len(result.Bass.Channels))}
 	for c := range mix.Channels {
 		mix.Channels[c] = make([]float32, min(result.Bass.Len(), result.Backing.Len()))
@@ -205,9 +226,7 @@ func Reread(result *Result) bool {
 	if frets <= 0 {
 		frets = 12
 	}
-	p.Events = read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, 0, nil)
-	p.Reader = Reader
-	return true
+	return read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, sensitivity, nil)
 }
 
 // Harmonise reads the chords of a recording that has none written down yet, from what is left

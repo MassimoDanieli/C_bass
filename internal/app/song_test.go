@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/MassimoDanieli/c_bass/internal/chords"
+	"github.com/MassimoDanieli/c_bass/internal/demo"
 	"math"
 	"os"
 	"testing"
@@ -269,5 +270,31 @@ func TestMovingTheBeatHalfway(t *testing.T) {
 	s.undo()
 	if s.pulse.Beats[0] != first {
 		t.Errorf("undone, the first beat is at %.3f, not %.3f", s.pulse.Beats[0], first)
+	}
+}
+
+// Reading the notes again with another setting for repeated notes gives a part read from the
+// sound, remembers the setting, and can be taken back.
+func TestReadingRepeatedNotesAgain(t *testing.T) {
+	os.Setenv("CBASS_NO_AUDIO", "1")
+	s := newSong("demo", demo.Pieces[4].Render()) // the rock piece: straight eighths on one note
+	t.Cleanup(s.player.Close)
+	written := len(s.project.Events)
+	s.transpose(0, 1)
+	s.reread(2)
+	if s.repeats() != 2 || s.project.Sensitivity == 0 {
+		t.Fatalf("the setting was not kept: %v", s.project.Sensitivity)
+	}
+	if got := len(s.project.Events); got < written*9/10 || got > written*11/10 {
+		t.Errorf("%d notes written, %d read", written, got)
+	}
+	for _, event := range s.project.Events {
+		if event.ID == "" || event.String < 0 {
+			t.Fatalf("a note read again has no name or no place: %+v", event)
+		}
+	}
+	s.undo()
+	if len(s.project.Events) != written || !s.project.Events[0].Edited || s.repeats() != 0 {
+		t.Errorf("undone, the part is not what it was: %d notes", len(s.project.Events))
 	}
 }

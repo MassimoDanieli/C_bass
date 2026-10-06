@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/MassimoDanieli/c_bass/internal/project"
 	"math"
 	"sort"
 
@@ -633,8 +634,21 @@ func (g *Game) editBar(c *canvas, v tabView, s *song, now float64) {
 			s.chord = -1
 			changed = true
 		}
-	} else if c.painting() {
-		c.label(g.t("Clic su una nota o su un accordo per correggerli.", "Click a note or a chord to put it right."), x, y+h/2, 13, regular, colFaint, left)
+	} else {
+		hint := g.t("Clic su una nota o su un accordo per correggerli.", "Click a note or a chord to put it right.")
+		c.label(hint, x, y+h/2, 13, regular, colFaint, left)
+		x += c.width(hint, 13, regular) + 22
+		// and how readily a note struck again on the same pitch is taken for a new one
+		setting := s.repeats()
+		text := g.t("Ribattute: ", "Repeated notes: ") + []string{g.t("normali", "usual"), g.t("di più", "more"), g.t("molte", "most")}[setting]
+		l := plain
+		if setting > 0 {
+			l = chosen
+		}
+		if x+190 < v.r.x+v.r.w-16-96-4-104-4-92-10 && press("repeats", text, 190, l) {
+			s.reread((setting + 1) % len(project.Sensitivities))
+			changed = true
+		}
 	}
 	// on the right, what is always there
 	x = v.r.x + v.r.w - 16 - 96 - 4 - 104 - 4 - 92
