@@ -20,6 +20,7 @@ type state struct {
 	chords   []chords.Chord
 	odd      []rhythm.OddBar
 	downbeat int
+	beats    []float64
 }
 
 // remember keeps the part as it is now, to come back to.
@@ -32,6 +33,7 @@ func (s *song) remember() {
 		append([]chords.Chord(nil), s.project.Chords...),
 		append([]rhythm.OddBar(nil), s.pulse.Odd...),
 		s.pulse.Downbeat,
+		s.pulse.Beats, // never changed in place: a new pulse is made instead
 	})
 }
 
@@ -43,7 +45,7 @@ func (s *song) undo() bool {
 	last := s.history[len(s.history)-1]
 	s.history = s.history[:len(s.history)-1]
 	s.project.Events, s.project.Chords = last.events, last.chords
-	s.pulse.Odd, s.pulse.Downbeat = last.odd, last.downbeat
+	s.pulse.Odd, s.pulse.Downbeat, s.pulse.Beats = last.odd, last.downbeat, last.beats
 	s.changed()
 	return true
 }
@@ -317,6 +319,24 @@ func (s *song) setBeats(bar, beats int) {
 	}
 	s.remember()
 	s.pulse.SetBeatsIn(bar, beats)
+	s.changed()
+}
+
+// retempo counts the piece twice as fast or half as fast. Which of the two a piece is in is
+// often a matter of opinion (is it 87, or 174?), and the program can settle on the one the
+// player would not: this turns one into the other. The notes stay where they are; the bars
+// and the note values are written again.
+func (s *song) retempo(double bool) {
+	if !double && len(s.pulse.Beats) < 16 {
+		return
+	}
+	if double && s.pulse.Tempo() > 260 {
+		return
+	}
+	s.remember()
+	fresh := s.pulse.Rescale(double)
+	s.pulse.Beats, s.pulse.Downbeat, s.pulse.Odd = fresh.Beats, fresh.Downbeat, nil
+	s.loopOff()
 	s.changed()
 }
 

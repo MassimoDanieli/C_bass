@@ -135,6 +135,17 @@ func (g *Game) workingScreen(c *canvas) {
 		}
 		if g.button(c, "back", rect{x, y + 180, 140, 38}, g.t("Indietro", "Back"), plain) || (c.in != nil && g.pressed(ebiten.KeyEscape)) {
 			g.goHome()
+			return
+		}
+		// what happened is written down: it can be looked at, and sent along with a report
+		if path := diaryPath(); path != "" {
+			if g.button(c, "diary", rect{x + 150, y + 180, 170, 38}, g.t("Apri il registro", "Open the log"), quiet) {
+				show(path)
+			}
+			if g.button(c, "report", rect{x + 330, y + 180, 200, 38}, g.t("Segnala il problema", "Report the problem"), quiet) {
+				show(issues)
+			}
+			c.label(g.t("Il registro resta su questo computer: lo mandi tu, se vuoi.", "The log stays on this computer: you send it, if you want to."), x, y+240, 12, regular, colFaint, left)
 		}
 		return
 	}

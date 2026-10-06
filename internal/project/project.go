@@ -114,6 +114,21 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 	switch {
 	case options.Bass != nil:
 		source, isolated = options.Bass, true
+		// the rest is the recording with that bass taken away, when the two line up
+		if options.Bass.SampleRate == mix.SampleRate && len(options.Bass.Channels) == len(mix.Channels) {
+			backing := &audio.Buffer{SampleRate: mix.SampleRate}
+			for c, channel := range mix.Channels {
+				rest := make([]float32, len(channel))
+				for i := range rest {
+					rest[i] = channel[i]
+					if i < len(options.Bass.Channels[c]) {
+						rest[i] -= options.Bass.Channels[c][i]
+					}
+				}
+				backing.Channels = append(backing.Channels, rest)
+			}
+			result.Bass, result.Backing = options.Bass, backing
+		}
 	case !options.Mix:
 		stems, err := separate(mix, options, report)
 		if err != nil {
@@ -121,15 +136,7 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 		}
 		report(Step{Stage: Separated})
 		source, isolated = stems["bass"], true
-		backing := &audio.Buffer{SampleRate: mix.SampleRate, Channels: [][]float32{make([]float32, mix.Len()), make([]float32, mix.Len())}}
-		for _, stem := range []string{"drums", "other", "vocals"} {
-			for c, channel := range stems[stem].Channels {
-				for i, v := range channel {
-					backing.Channels[c][i] += v
-				}
-			}
-		}
-		result.Bass, result.Backing = stems["bass"], backing
+		result.Bass, result.Backing = stems["bass"], stems["rest"]
 	}
 
 	tuning := fretboard.TuningFor(options.Tuning)
@@ -143,6 +150,7 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 		pulse = rhythm.Steady(120, mix.Duration(), options.Beats)
 		report(Step{Stage: BeatFound})
 	} else {
+		pulse.Downbeat = chords.FirstBeat(result.Backing, pulse, events)
 		report(Step{Stage: BeatFound, Done: int64(pulse.Tempo() + 0.5), Total: int64(len(pulse.Beats))})
 	}
 
