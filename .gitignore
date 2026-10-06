@@ -1,0 +1,6 @@
+/cbass
+/cbass.exe
+/dist/
+*.cbass.json
+*.tab.txt
+.DS_Store

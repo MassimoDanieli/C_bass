@@ -1,0 +1,95 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: cbass-macos-arm64
+            binary: cbass
+          - os: windows-latest
+            name: cbass-windows-x64
+            binary: cbass.exe
+          - os: ubuntu-latest
+            name: cbass-linux-x64
+            binary: cbass
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build
+        shell: bash
+        run: go build -trimpath -ldflags "-s -w -X main.version=$(git rev-parse --short HEAD)" -o "${{ matrix.binary }}" ./cmd/cbass
+      - name: Keep the model between runs
+        uses: actions/cache@v4
+        with:
+          path: model
+          key: htdemucs-da9e5101
+      # The real thing, on the real machine: separate a short recording made on the spot,
+      # read its notes, and say how long it took.
+      - name: Try it end to end
+        shell: bash
+        run: |
+          mkdir -p model
+          if [ ! -f model/htdemucs.onnx ]; then
+            curl -sSfL -o model/htdemucs.onnx https://basso.massimodanieli.com/assets/separator/htdemucs.onnx
+          fi
+          export CBASS_MODEL="$PWD/model/htdemucs.onnx"
+          go run ./tools/testtone trial.wav
+          start=$(date +%s)
+          "./${{ matrix.binary }}" analyse -stems -o out trial.wav | tee run.log
+          took=$(( $(date +%s) - start ))
+          cat out/trial.tab.txt | head -12
+          test -s out/trial.bass.wav && test -s out/trial.no-bass.wav && test -s out/trial.cbass.json
+          go run ./tools/testtone -check out/trial.cbass.json
+          echo "::notice title=${{ matrix.name }}::30 seconds of audio analysed in ${took}s ($(grep -c . run.log) steps): $(grep 'read .* notes' run.log | sed 's/^ *//')"
+      - name: Try CoreML
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        shell: bash
+        run: |
+          export CBASS_MODEL="$PWD/model/htdemucs.onnx"
+          start=$(date +%s)
+          if ./cbass analyse -coreml -o out-coreml trial.wav; then
+            echo "::notice title=CoreML::30 seconds of audio analysed in $(( $(date +%s) - start ))s with CoreML"
+          else
+            echo "::notice title=CoreML::CoreML could not run the model"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.binary }}
