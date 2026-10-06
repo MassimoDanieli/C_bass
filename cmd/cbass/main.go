@@ -12,28 +12,13 @@ import (
 	"time"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
-	"github.com/MassimoDanieli/c_bass/internal/demucs"
 	"github.com/MassimoDanieli/c_bass/internal/fretboard"
-	"github.com/MassimoDanieli/c_bass/internal/provision"
-	"github.com/MassimoDanieli/c_bass/internal/rhythm"
+	"github.com/MassimoDanieli/c_bass/internal/project"
 	"github.com/MassimoDanieli/c_bass/internal/tab"
-	"github.com/MassimoDanieli/c_bass/internal/transcribe"
 )
 
 // version is set at build time.
 var version = "dev"
-
-// Project is everything worked out about one recording.
-type Project struct {
-	Version  string             `json:"cbass"`
-	Title    string             `json:"title"`
-	Duration float64            `json:"duration"`
-	Source   string             `json:"source"` // "bass" when read from the isolated bass, "mix" otherwise
-	Tuning   string             `json:"tuning"`
-	Frets    int                `json:"frets"`
-	Rhythm   *rhythm.Rhythm     `json:"rhythm,omitempty"`
-	Events   []transcribe.Event `json:"events"`
-}
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] == "-h" || os.Args[1] == "--help" || os.Args[1] == "help" {
@@ -121,116 +106,83 @@ func analyse(args []string) error {
 		fmt.Printf("%6.1fs  %s\n", time.Since(began).Seconds(), fmt.Sprintf(format, values...))
 	}
 
-	mix, err := audio.Decode(path)
+	recording, err := audio.Decode(path)
 	if err != nil {
 		return err
 	}
-	mix = audio.Resample(mix.Stereo(), demucs.SampleRate)
+	mix := project.Prepare(recording)
 	step("read %s: %.1f seconds", filepath.Base(path), mix.Duration())
 
-	source, isolated := mix, false
-	switch {
-	case s.bass != "":
-		bass, err := audio.Decode(s.bass)
-		if err != nil {
+	options := project.Options{
+		Version: version, Tuning: s.tuning, Frets: s.frets, Beats: s.bar, Sensitivity: s.sensitivity,
+		Threads: s.threads, CoreML: s.coreML, Mix: s.mix,
+	}
+	if s.bass != "" {
+		if options.Bass, err = audio.Decode(s.bass); err != nil {
 			return err
 		}
-		source, isolated = bass, true
-	case !s.mix:
-		stems, err := separate(mix, s)
-		if err != nil {
-			return err
+	}
+	var failed error
+	shown := int64(-1)
+	result, err := project.Analyse(mix, name, options, func(at project.Step) {
+		switch at.Stage {
+		case project.Downloading:
+			if at.Done>>20 == shown && at.Done != at.Total {
+				return
+			}
+			shown = at.Done >> 20
+			if at.Total > 0 {
+				fmt.Printf("\r        downloading %s: %d of %d MB", at.Detail, at.Done>>20, at.Total>>20)
+			} else {
+				fmt.Printf("\r        downloading %s: %d MB", at.Detail, at.Done>>20)
+			}
+			if at.Done == at.Total {
+				fmt.Println()
+			}
+		case project.Separating:
+			fmt.Printf("\r        separating: %d of %d", at.Done, at.Total)
+			if at.Done == at.Total {
+				fmt.Println()
+			}
+		case project.Separated:
+			step("separated the bass")
+		case project.NotesRead:
+			step("read %d notes", at.Done)
+		case project.BeatFound:
+			if at.Total == 0 {
+				step("no steady beat was found: bars are written at 120 BPM")
+			} else {
+				step("found the beat: %d BPM, %d beats", at.Done, at.Total)
+			}
 		}
-		step("separated the bass")
-		source, isolated = stems["bass"], true
-		if s.stems {
-			backing := &audio.Buffer{SampleRate: mix.SampleRate, Channels: [][]float32{make([]float32, mix.Len()), make([]float32, mix.Len())}}
-			for _, stem := range []string{"drums", "other", "vocals"} {
-				for c, channel := range stems[stem].Channels {
-					for i, v := range channel {
-						backing.Channels[c][i] += v
-					}
-				}
-			}
-			if err := audio.WriteWAV(filepath.Join(out, name+".no-bass.wav"), backing); err != nil {
-				return err
-			}
-			if err := audio.WriteWAV(filepath.Join(out, name+".bass.wav"), stems["bass"]); err != nil {
-				return err
-			}
-			step("wrote the two recordings")
+	})
+	if err != nil {
+		return err
+	}
+	if s.stems && result.Bass != nil {
+		if err := audio.WriteWAV(filepath.Join(out, name+".no-bass.wav"), result.Backing); err != nil {
+			failed = err
 		}
+		if err := audio.WriteWAV(filepath.Join(out, name+".bass.wav"), result.Bass); err != nil {
+			failed = err
+		}
+		if failed != nil {
+			return failed
+		}
+		step("wrote the two recordings")
 	}
 
-	events := transcribe.Transcribe(source, transcribe.Options{Isolated: isolated, Sensitivity: s.sensitivity})
-	if len(events) == 0 {
-		return fmt.Errorf("no notes were found in %s", filepath.Base(path))
-	}
-	tuning := fretboard.TuningFor(s.tuning)
-	events = fretboard.Finger(events, tuning, s.frets)
-	step("read %d notes", len(events))
-
-	pulse := rhythm.Analyse(mix, s.bar)
-	if pulse == nil {
-		pulse = rhythm.Steady(120, mix.Duration(), s.bar)
-		step("no steady beat was found: bars are written at 120 BPM")
-	} else {
-		step("found the beat: %.0f BPM, %d beats", pulse.Tempo(), len(pulse.Beats))
-	}
-
-	project := Project{
-		Version: version, Title: name, Duration: mix.Duration(), Source: map[bool]string{true: "bass", false: "mix"}[isolated],
-		Tuning: tuning.Key, Frets: s.frets, Rhythm: pulse, Events: events,
-	}
-	data, err := json.MarshalIndent(project, "", " ")
+	data, err := json.MarshalIndent(result.Project, "", " ")
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(out, name+".cbass.json"), data, 0o644); err != nil {
 		return err
 	}
-	text := tab.Text(name, events, pulse, tuning, 4)
+	text := tab.Text(name, result.Project.Events, result.Project.Rhythm, fretboard.TuningFor(result.Project.Tuning), 4)
 	if err := os.WriteFile(filepath.Join(out, name+".tab.txt"), []byte(text), 0o644); err != nil {
 		return err
 	}
 	step("wrote %s and %s in %s", name+".cbass.json", name+".tab.txt", out)
 	return nil
-}
-
-func separate(mix *audio.Buffer, s *settings) (demucs.Stems, error) {
-	shown := int64(-1)
-	download := func(what string, done, total int64) {
-		if done>>20 == shown && done != total {
-			return
-		}
-		shown = done >> 20
-		if total > 0 {
-			fmt.Printf("\r        downloading %s: %d of %d MB", what, done>>20, total>>20)
-		} else {
-			fmt.Printf("\r        downloading %s: %d MB", what, done>>20)
-		}
-		if done == total {
-			fmt.Println()
-		}
-	}
-	library, err := provision.Runtime(download)
-	if err != nil {
-		return nil, err
-	}
-	model, err := provision.Model(download)
-	if err != nil {
-		return nil, err
-	}
-	separator, err := demucs.Open(demucs.Options{Library: library, Model: model, Threads: s.threads, CoreML: s.coreML})
-	if err != nil {
-		return nil, err
-	}
-	defer separator.Close()
-	stems, err := separator.Separate(mix, func(done, total int) {
-		fmt.Printf("\r        separating: %d of %d", done, total)
-		if done == total {
-			fmt.Println()
-		}
-	})
-	return stems, err
 }

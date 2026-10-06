@@ -21,12 +21,28 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: What the window needs to be built on Linux
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev xvfb
       - name: Formatting
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
       - name: Test
         run: go test ./...
+      # The window, opened for real on a made-up recording, and a picture of it kept.
+      - name: Open the window
+        env:
+          CBASS_LIBRARY: ${{ runner.temp }}/library
+          CBASS_NO_AUDIO: '1'
+        run: |
+          go run ./tools/demosong
+          go build -o cbass-app ./cmd/cbass-app
+          CBASS_OPEN=demo CBASS_SHOT_AT=9.3 CBASS_SHOT=window-linux.png timeout 120 xvfb-run -a -s "-screen 0 1280x860x24" ./cbass-app
+          test -s window-linux.png
+      - uses: actions/upload-artifact@v6
+        with:
+          name: window-linux
+          path: window-linux.png
 
   build:
     needs: test
@@ -37,9 +53,11 @@ jobs:
           - os: macos-14
             name: cbass-macos-arm64
             binary: cbass
+            app: C_bass-macos-arm64
           - os: windows-latest
             name: cbass-windows-x64
             binary: cbass.exe
+            app: C_bass-windows-x64
           - os: ubuntu-latest
             name: cbass-linux-x64
             binary: cbass
@@ -81,3 +99,61 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.binary }}
+
+      # The application with its window.
+      - name: Build the application (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          version=$(git rev-parse --short HEAD)
+          app=C_bass.app/Contents
+          mkdir -p "$app/MacOS" "$app/Resources"
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$app/MacOS/C_bass" ./cmd/cbass-app
+          sed "s/VERSION/$version/" packaging/Info.plist > "$app/Info.plist"
+          go run ./tools/icon C_bass.iconset
+          iconutil -c icns -o "$app/Resources/C_bass.icns" C_bass.iconset
+          codesign --force --deep --sign - C_bass.app
+          codesign --verify --deep --strict C_bass.app
+      - name: Build the application (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$(git rev-parse --short HEAD)" -o C_bass.exe ./cmd/cbass-app
+      # Opened for real on this machine, on a made-up recording, and a picture of it kept.
+      - name: Open the window
+        if: matrix.app
+        shell: bash
+        env:
+          CBASS_LIBRARY: ${{ runner.temp }}/library
+          CBASS_NO_AUDIO: '1'
+          CBASS_OPEN: demo
+          CBASS_SHOT_AT: '9.3'
+          CBASS_SHOT: window.png
+        run: |
+          go run ./tools/demosong
+          if [ "$RUNNER_OS" = macOS ]; then program=C_bass.app/Contents/MacOS/C_bass; else program=./C_bass.exe; fi
+          "$program" &
+          pid=$!
+          for i in $(seq 1 90); do
+            if ! kill -0 $pid 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if kill -0 $pid 2>/dev/null; then kill $pid; echo "the window never drew"; exit 1; fi
+          wait $pid
+          test -s window.png
+      - name: Pack the application (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent C_bass.app C_bass-macos-arm64.zip
+      - uses: actions/upload-artifact@v6
+        if: runner.os == 'macOS'
+        with:
+          name: ${{ matrix.app }}
+          path: C_bass-macos-arm64.zip
+      - uses: actions/upload-artifact@v6
+        if: runner.os == 'Windows'
+        with:
+          name: ${{ matrix.app }}
+          path: C_bass.exe
+      - uses: actions/upload-artifact@v6
+        if: matrix.app
+        with:
+          name: window-${{ matrix.name }}
+          path: window.png
