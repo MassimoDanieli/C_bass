@@ -10,7 +10,7 @@ Dal brano alla parte di basso, come programma a sé: niente browser, niente Java
 |---|---|
 | **Motore** (separazione del basso, note, tempo e battute, diteggiatura, tablatura) | fatto |
 | **Finestra** (riproduzione a velocità variabile, tablatura che scorre, manico) | fatta, prima versione |
-| **Applicazione** per macOS (Apple Silicon) e Windows | si scarica dalla scheda Actions; manca l'installazione |
+| **Applicazione** per macOS (Apple Silicon), Windows e Linux | fatta: si scarica dalla pagina [Releases](https://github.com/MassimoDanieli/C_bass/releases) e si installa; non è firmata |
 
 Il motore è nato come copia fedele di quello di Manico 7.2.0. La lettura delle note è stata poi rifatta (vedi sotto) e non coincide più con quella di Manico.
 
@@ -28,6 +28,18 @@ Misurata contro uno spartito: una registrazione di 3:21 il cui basso è scritto 
 Quella registrazione è un basso sintetico, quindi facile. Su una linea pizzicata con ribattuti, ottave e note smorzate, da 90 a 170 BPM: dal 91–93% al 100%. Su un basso vero non c'è uno spartito con cui misurare; lì le note lette scendono da 846 a 687 perché non si spezzano più, e quelle sotto gli 80 ms da 131 a 62.
 
 Cosa è cambiato: l'altezza si legge dall'intera nota e non da ogni centesimo di secondo (un momento solo confonde facilmente un'ottava con l'altra); una nota non si spezza dove cambia solo il suo suono (una corda bassa che risuona perde la fondamentale); l'altezza si segue tra un semitono e l'altro, così un basso un po' calante o un fretless non sfarfalla tra due nomi e un glissato non lascia una nota a ogni tasto; il basso separato si misura contro il brano, così il fruscio che la separazione lascia dove il basso non c'è non diventa note.
+
+## Installare
+
+Dalla pagina [Releases](https://github.com/MassimoDanieli/C_bass/releases):
+
+| | |
+|---|---|
+| **macOS** (Apple Silicon) | `C_bass-macos-arm64.dmg`: si apre e si trascina C_bass in Applicazioni |
+| **Windows** (64 bit) | `C_bass-windows-x64-setup.exe`: l'installer, solo per il proprio utente, senza password di amministratore. `C_bass-windows-x64-portable.exe` parte senza installare niente |
+| **Linux** (64 bit) | `C_bass-linux-x64.deb` per Debian, Ubuntu, Mint: `sudo apt install ./C_bass-linux-x64.deb`. `C_bass-linux-x64.tar.gz` per le altre: si scompatta e si lancia `./install.sh`, che installa nella propria home (`--remove` per toglierlo) |
+
+Nessuno è firmato con un certificato a pagamento, quindi al primo avvio il sistema chiede conferma. macOS: Impostazioni di Sistema → Privacy e sicurezza → «Apri comunque». Windows: «Ulteriori informazioni» → «Esegui comunque».
 
 ## L'applicazione
 
@@ -51,7 +63,7 @@ Durante la riproduzione:
 
 Tasti: spazio suona e ferma, ← → una battuta indietro e avanti, ↑ ↓ velocità, A e B inizio e fine della ripetizione, L la accende e la spegne, M basso muto, Esc torna all'elenco.
 
-I brani analizzati stanno nella cartella dell'utente (`~/Library/Application Support/C_bass` su macOS, `%AppData%\C_bass` su Windows); il file originale non viene toccato.
+I brani analizzati stanno nella cartella dell'utente (`~/Library/Application Support/C_bass` su macOS, `%AppData%\C_bass` su Windows, `~/.config/C_bass` su Linux); il file originale non viene toccato.
 
 ## Da riga di comando
 
@@ -103,9 +115,7 @@ go build -o cbass ./cmd/cbass
 go build -o cbass-app ./cmd/cbass-app
 ```
 
-Ogni push compila per macOS arm64, Windows x64 e Linux x64, e su ciascuna macchina prova il programma intero, modello compreso, su una registrazione creata al momento (`tools/testtone`). Su macOS e Windows compila anche l'applicazione, la apre su un brano inventato (`tools/demosong`) e ne conserva un'immagine. Programmi, applicazioni e immagini sono tra gli artefatti dell'esecuzione, nella scheda Actions.
-
-L'applicazione per macOS non è firmata con un certificato Apple: se è stata scaricata dal browser, la prima volta va aperta con clic destro, «Apri».
+Ogni push compila per macOS arm64, Windows x64 e Linux x64, e su ciascuna macchina prova il programma intero, modello compreso, su una registrazione creata al momento (`tools/testtone`). Poi compila l'applicazione, la apre su uno dei brani inclusi e ne conserva un'immagine, e ne fa i pacchetti: immagine disco per macOS, installer per Windows (Inno Setup, `packaging/C_bass.iss`), `.deb` e archivio per Linux (`packaging/linux.sh`). Ogni pacchetto è provato lì: installato, avviato, tolto. Lanciata a mano con un nome di versione, la build raccoglie i pacchetti in una bozza di release.
 
 ## Licenze
 
@@ -115,7 +125,7 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 ## English
 
-**Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It began as a faithful port of Manico 7.2.0; the note reader has since been redone. Measured against a score (a 3:21 recording whose bass is written in a Guitar Pro file, 155 notes): 148 right, 5 an octave off, 2 wrong and 39 extra notes before; 155 right and none extra now. That recording is a synthetic bass, the easy case; on a plucked line with repeats, octaves and muted notes from 90 to 170 BPM it went from 91–93% to 100%. The pitch is now read from the whole note rather than frame by frame, a note is not split where only its sound changes, pitch is followed between semitones, and the separated bass is measured against the recording so that what is left of no bass is not read as notes. The window is in its first version; the applications for macOS (Apple Silicon) and Windows are built on every push and downloaded from the Actions tab, with no installer yet.
+**Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It began as a faithful port of Manico 7.2.0; the note reader has since been redone. Measured against a score (a 3:21 recording whose bass is written in a Guitar Pro file, 155 notes): 148 right, 5 an octave off, 2 wrong and 39 extra notes before; 155 right and none extra now. That recording is a synthetic bass, the easy case; on a plucked line with repeats, octaves and muted notes from 90 to 170 BPM it went from 91–93% to 100%. The pitch is now read from the whole note rather than frame by frame, a note is not split where only its sound changes, pitch is followed between semitones, and the separated bass is measured against the recording so that what is left of no bass is not read as notes. The window is in its first version; the applications are on the [Releases](https://github.com/MassimoDanieli/C_bass/releases) page: a disk image for macOS (Apple Silicon), an installer and a portable program for Windows, a `.deb` and an archive with `./install.sh` for Linux. None is signed with a paid certificate, so the system asks before the first start (macOS: System Settings → Privacy & Security → Open Anyway; Windows: More info → Run anyway).
 
 **The application.** Five pieces written for the program come with it (a blues, a funk, a bossa nova, a walking line, a rock), bass and drums already apart, to try the window and practise on. The window is in Italian or English, following the computer's language, with a button to switch. Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. The bar lines can be moved by a beat, a note the reader is unsure of carries a question mark, and a recording with no bass in it is said to have none rather than given made-up notes. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
 
@@ -123,6 +133,6 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 **Downloads.** On first use ONNX Runtime (about 30 MB, from the official GitHub release) and the Demucs model (174 MB, from Manico's site) are fetched into the user's cache, each checked against its hash. Nothing is sent anywhere.
 
-**Build.** Go 1.26 and a C compiler; on Linux the window also needs the X11, OpenGL and ALSA headers listed in `.github/workflows/build.yml`. `go test ./...`, then `go build -o cbass ./cmd/cbass` and `go build -o cbass-app ./cmd/cbass-app`. Every push is built for macOS arm64, Windows x64 and Linux x64, and on each machine the whole program, model included, is tried on a recording made on the spot; on macOS and Windows the application is built too, opened on a made-up recording, and a picture of its window kept. The macOS application is not signed with an Apple certificate: if it came through a browser, open it the first time with right-click, Open.
+**Build.** Go 1.26 and a C compiler; on Linux the window also needs the X11, OpenGL and ALSA headers listed in `.github/workflows/build.yml`. `go test ./...`, then `go build -o cbass ./cmd/cbass` and `go build -o cbass-app ./cmd/cbass-app`. Every push is built for macOS arm64, Windows x64 and Linux x64, and on each machine the whole program, model included, is tried on a recording made on the spot; then the application is built, opened on one of its built-in pieces with a picture of the window kept, and packed (disk image, Inno Setup installer from `packaging/C_bass.iss`, `.deb` and archive from `packaging/linux.sh`); each package is tried there: installed, started, removed. Run by hand with a version name, the build gathers the packages in a draft release.
 
 **Licences.** The code is GPL-3.0-or-later. The model weights derive from Meta's Demucs weights, made available for personal and research use; they are not part of this repository. The window uses [Ebitengine](https://ebitengine.org) (Apache-2.0) and the Go fonts (BSD).
