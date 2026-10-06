@@ -35,7 +35,7 @@ func (g *Game) playScreen(c *canvas) {
 	neck := rect{middle.x, middle.y + tabHeight + 14, middle.w, middle.h - tabHeight - 14}
 
 	// the menu, when open, is in front of everything: it takes the click first
-	export := rect{g.w - 20 - 44 - 10 - 96, 15, 96, 34}
+	export := rect{g.w - 20 - 44 - 6 - 34 - 10 - 96, 15, 96, 34}
 	if c.in != nil && g.menu {
 		g.exportMenu(c, export, s)
 		if c.in.pressed || c.in.released {
@@ -203,6 +203,10 @@ func (g *Game) playHeader(c *canvas, r, export rect, s *song, now float64) {
 	}
 	if g.button(c, "language", rect{r.w - 20 - 44, 15, 44, 34}, g.t("EN", "IT"), quiet) {
 		g.switchLanguage()
+	}
+	if g.button(c, "help", rect{r.w - 20 - 44 - 6 - 34, 15, 34, 34}, "?", quiet) {
+		g.guide, g.guideScroll, g.menu = "help", 0, false
+		return
 	}
 	if g.button(c, "export", export, g.t("Esporta", "Export"), map[bool]look{true: chosen, false: plain}[g.menu]) {
 		g.menu = !g.menu

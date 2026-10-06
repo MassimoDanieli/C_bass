@@ -54,6 +54,8 @@ type settings struct {
 	Metronome bool `json:"metronome"`
 	Quicken   bool `json:"quicken"`
 	Low       bool `json:"lowPosition"`
+	// NoUpdateCheck turns off the question asked of GitHub at start: is there a newer version?
+	NoUpdateCheck bool `json:"noUpdateCheck"`
 }
 
 // Game is the whole program, as the window library wants it.
@@ -67,19 +69,22 @@ type Game struct {
 	job  *job
 	song *song
 
-	in      pointer
-	keys    []ebiten.Key
-	active  string // the control the mouse went down on
-	confirm string // the recording about to be removed
-	scroll  float32
-	notice  string
-	noticed time.Time
-	good    bool // the notice is good news, not a complaint
-	menu    bool // the list of ways to save the part is open
-	awake   int  // frames still to paint: an idle window is left as it is
-	frames  int
-	seen    [4]float32
-	choose  chan string // the answer of the file dialog
+	in          pointer
+	keys        []ebiten.Key
+	active      string // the control the mouse went down on
+	confirm     string // the recording about to be removed
+	scroll      float32
+	notice      string
+	noticed     time.Time
+	good        bool   // the notice is good news, not a complaint
+	menu        bool   // the list of ways to save the part is open
+	guide       string // "help" or "about" when one of those pages is open over the screen
+	guideScroll float32
+	latest      latest
+	awake       int // frames still to paint: an idle window is left as it is
+	frames      int
+	seen        [4]float32
+	choose      chan string // the answer of the file dialog
 
 	scale float32
 	w, h  float32
@@ -115,6 +120,11 @@ func Run(version string) error {
 	}
 	g.entries = lib.List()
 	g.shot = os.Getenv("CBASS_SHOT")
+	g.guide = os.Getenv("CBASS_GUIDE") // for a picture of those pages
+	g.lookForUpdate()
+	if pretend := os.Getenv("CBASS_LATEST"); pretend != "" { // for a picture of the notice
+		g.latest.version, g.latest.page, g.latest.asked = pretend, homePage+"/releases", true
+	}
 	g.shotAt, _ = strconv.ParseFloat(os.Getenv("CBASS_SHOT_AT"), 64)
 	if os.Getenv("CBASS_SHOT_DO") == "working" { // a picture of the work in progress, without doing any
 		g.job = &job{title: "Giro di prova", started: time.Now(), stage: stageSeparating, done: 12, total: 31, downloaded: true}
@@ -292,6 +302,14 @@ func (g *Game) Draw(target *ebiten.Image) {
 
 // frame lays out the current screen: to act on it when c takes the mouse, to paint it otherwise.
 func (g *Game) frame(c *canvas) {
+	if g.guide != "" {
+		g.guideScreen(c)
+		return
+	}
+	if c.in != nil && g.pressed(ebiten.KeyF1) {
+		g.guide, g.guideScroll = "help", 0
+		return
+	}
 	switch g.screen {
 	case home:
 		g.homeScreen(c)

@@ -19,6 +19,24 @@ func (g *Game) homeScreen(c *canvas) {
 	if g.button(c, "language", rect{x + width - 54, 48, 54, 30}, g.t("EN", "IT"), quiet) {
 		g.switchLanguage()
 	}
+	about := g.t("Informazioni", "About")
+	aboutWidth := c.width(about, 14, medium) + 24
+	if g.button(c, "about", rect{x + width - 54 - 6 - aboutWidth, 48, aboutWidth, 30}, about, quiet) {
+		g.guide, g.guideScroll = "about", 0
+	}
+	help := g.t("Aiuto", "Help")
+	helpWidth := c.width(help, 14, medium) + 24
+	if g.button(c, "help", rect{x + width - 54 - 12 - aboutWidth - helpWidth, 48, helpWidth, 30}, help, quiet) {
+		g.guide, g.guideScroll = "help", 0
+	}
+	// a newer version, when there is one
+	if found, page, _, _ := g.latest.get(); found != "" {
+		text := g.t("È uscita la versione ", "Version ") + found + g.t(": scarica", " is out: download")
+		w := c.width(text, 14, medium) + 28
+		if g.button(c, "update", rect{x + width - w, 88, w, 28}, text, chosen) {
+			show(page)
+		}
+	}
 
 	drop := rect{x, 128, width, 170}
 	c.round(drop, 16, colPanel)
