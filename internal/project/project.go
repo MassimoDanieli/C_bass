@@ -136,15 +136,7 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 		}
 		report(Step{Stage: Separated})
 		source, isolated = stems["bass"], true
-		backing := &audio.Buffer{SampleRate: mix.SampleRate, Channels: [][]float32{make([]float32, mix.Len()), make([]float32, mix.Len())}}
-		for _, stem := range []string{"drums", "other", "vocals"} {
-			for c, channel := range stems[stem].Channels {
-				for i, v := range channel {
-					backing.Channels[c][i] += v
-				}
-			}
-		}
-		result.Bass, result.Backing = stems["bass"], backing
+		result.Bass, result.Backing = stems["bass"], stems["rest"]
 	}
 
 	tuning := fretboard.TuningFor(options.Tuning)

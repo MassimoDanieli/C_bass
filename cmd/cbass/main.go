@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ import (
 var version = "dev"
 
 func main() {
+	// The recordings held in memory are few and large: tidying up sooner costs little time and
+	// keeps the program from holding twice what it needs.
+	debug.SetGCPercent(25)
 	if len(os.Args) < 2 || os.Args[1] == "-h" || os.Args[1] == "--help" || os.Args[1] == "help" {
 		usage()
 		return

@@ -21,7 +21,10 @@ const (
 // Sources are the stems, in the order the model returns them.
 var Sources = [sources]string{"drums", "bass", "other", "vocals"}
 
-// Stems is a separated recording: one stereo buffer per source.
+// Stems is a separated recording: the "bass", and the "rest", which is the drums, the voice
+// and everything else together. The network gives four parts; the three that are not the
+// bass are added up as they come, because that is all they are wanted for and a long
+// recording kept in four parts takes twice the memory.
 type Stems map[string]*audio.Buffer
 
 // Options for a Separator.
@@ -84,6 +87,12 @@ func Open(options Options) (*Separator, error) {
 	if err := settings.SetCpuMemArena(false); err != nil {
 		return nil, err
 	}
+	// The runtime's rewriting of the network before running it buys no speed with this model
+	// and costs memory: measured on the same recording, about 2.4 GB at the peak without it
+	// against 3 to 4.3 GB with it, in the same time, the result the same to the last bit but one.
+	if err := settings.SetGraphOptimizationLevel(ort.GraphOptimizationLevelDisableAll); err != nil {
+		return nil, err
+	}
 	if options.CoreML {
 		if err := settings.AppendExecutionProviderCoreMLV2(map[string]string{"MLComputeUnits": "ALL"}); err != nil {
 			return nil, fmt.Errorf("CoreML is not available: %w", err)
@@ -132,7 +141,7 @@ func (s *Separator) Separate(mix *audio.Buffer, progress func(done, total int)) 
 	}
 	frames := (segment + hop - 1) / hop
 
-	out := make([][]float32, sources*2)
+	out := make([][]float32, 4) // the bass, left and right; then the rest
 	for i := range out {
 		out[i] = make([]float32, length)
 	}
@@ -188,7 +197,10 @@ func (s *Separator) Separate(mix *audio.Buffer, progress func(done, total int)) 
 				plane := bins * frames
 				base := (source*4 + 2*c) * plane
 				work.inverse(masks[base:base+plane], masks[base+plane:base+2*plane], frames, segment, chunkOut)
-				target := out[source*2+c]
+				target := out[2+c]
+				if Sources[source] == "bass" {
+					target = out[c]
+				}
 				for i := 0; i < chunk; i++ {
 					target[offset+i] += weight[i] * chunkOut[trim+i]
 				}
@@ -202,17 +214,15 @@ func (s *Separator) Separate(mix *audio.Buffer, progress func(done, total int)) 
 			progress(pass+1, total)
 		}
 	}
-	stems := Stems{}
-	for source, name := range Sources {
-		for c := 0; c < 2; c++ {
-			row := out[source*2+c]
-			for i := range row {
-				row[i] /= sumWeight[i]
-			}
+	for _, row := range out {
+		for i := range row {
+			row[i] /= sumWeight[i]
 		}
-		stems[name] = &audio.Buffer{SampleRate: SampleRate, Channels: [][]float32{out[source*2], out[source*2+1]}}
 	}
-	return stems, nil
+	return Stems{
+		"bass": &audio.Buffer{SampleRate: SampleRate, Channels: out[:2]},
+		"rest": &audio.Buffer{SampleRate: SampleRate, Channels: out[2:]},
+	}, nil
 }
 
 // run feeds one window to the network and returns its two answers: the spectrogram of each

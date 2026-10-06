@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,6 +95,7 @@ func Run(version string) error {
 	if err != nil {
 		return err
 	}
+	openDiary(version)
 	g := &Game{version: version, lib: lib, settings: settings{Tuning: "4", Bass: 1, Rest: 1}, scale: 1}
 	g.loadSettings()
 	if g.settings.Language == "" {
@@ -242,6 +244,7 @@ func (g *Game) mouse() (float32, float32) {
 
 // Update takes in what the player did and acts on it.
 func (g *Game) Update() error {
+	defer crashed("update")
 	x, y := g.mouse()
 	_, wheel := ebiten.Wheel()
 	g.in = pointer{
@@ -272,6 +275,7 @@ func (g *Game) Update() error {
 
 // Draw paints the window.
 func (g *Game) Draw(target *ebiten.Image) {
+	defer crashed("draw")
 	if g.awake <= 0 {
 		return
 	}
@@ -604,11 +608,16 @@ type job struct {
 	err         error
 	song        *song
 	stop        atomic.Bool // set to give the work up
+	noted       time.Time
 }
 
 func (j *job) at(s stage, detail string, done, total int64) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if s != j.stage || j.noted.IsZero() {
+		note("%q: step %d after %.1f s", j.title, s, time.Since(j.started).Seconds())
+		j.noted = time.Now()
+	}
 	j.stage, j.detail, j.done, j.total = s, detail, done, total
 	if s == stageDownloading {
 		j.downloaded = true
@@ -622,10 +631,19 @@ func (j *job) run(work func() (*song, error)) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("%v", r)
+				note("%q: CRASH: %v\n%s", j.title, r, debug.Stack())
 			}
 		}()
 		s, err = work()
 	}()
+	switch {
+	case j.stop.Load():
+		note("%q: given up after %.1f s", j.title, time.Since(j.started).Seconds())
+	case err != nil:
+		note("%q: failed after %.1f s: %v", j.title, time.Since(j.started).Seconds(), err)
+	default:
+		note("%q: ready after %.1f s", j.title, time.Since(j.started).Seconds())
+	}
 	if s != nil && j.stop.Load() { // finished after it was given up: nobody will play it
 		s.player.Close()
 		return
