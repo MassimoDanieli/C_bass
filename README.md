@@ -17,7 +17,7 @@ Il motore dà gli stessi risultati di Manico 7.2.0: sul brano di prova (4:48) le
 ## Uso
 
 ```
-cbass analyse -stems brano.mp3
+cbass -stems brano.mp3
 ```
 
 Scrive accanto al brano:
@@ -68,7 +68,7 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 **Status.** The engine is done and runs from the command line: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It gives the same results as Manico 7.2.0: on the test track (4:48) all 984 notes and 705 beats match one for one. The interface (playback at variable speed, scrolling tablature, fretboard) and the packaged applications for macOS (Apple Silicon) and Windows are still to do.
 
-**Use.** `cbass analyse -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. On first use it downloads ONNX Runtime (about 30 MB, from the official GitHub release) and the Demucs model (174 MB, from Manico's site) into the user's cache, each checked against its hash. `cbass help` lists the options.
+**Use.** `cbass -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. On first use it downloads ONNX Runtime (about 30 MB, from the official GitHub release) and the Demucs model (174 MB, from Manico's site) into the user's cache, each checked against its hash. `cbass help` lists the options.
 
 **Build.** Go 1.24 and a C compiler. `go test ./...`, then `go build -o cbass ./cmd/cbass`. Every push is built for macOS arm64, Windows x64 and Linux x64, and on each machine the whole program, model included, is tried on a recording made on the spot; the binaries are among the run's artifacts.
 

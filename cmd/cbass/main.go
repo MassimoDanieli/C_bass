@@ -49,15 +49,18 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		usage()
-		os.Exit(2)
+		// "analyse" may be left out: anything else is taken as its options and the recording.
+		if err := analyse(os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "cbass:", err)
+			os.Exit(1)
+		}
 	}
 }
 
 func usage() {
 	fmt.Print(`cbass ` + version + ` — from a recording to a bass part
 
-  cbass analyse [options] <recording.mp3|.wav>
+  cbass [options] <recording.mp3|.wav>
 
 Separates the bass from the recording, reads its notes, finds the bars, and writes
 next to the recording (or in the folder given with -o):
