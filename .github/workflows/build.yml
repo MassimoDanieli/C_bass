@@ -142,8 +142,10 @@ jobs:
             echo "::error title=${{ matrix.app }}::the window never drew: $(said)"
             exit 1
           fi
-          if ! wait $pid || ! test -s window.png; then
-            echo "::error title=${{ matrix.app }}::the window did not open: $(said)"
+          status=0
+          wait $pid || status=$?
+          if [ $status -ne 0 ] || ! test -s window.png; then
+            echo "::error title=${{ matrix.app }}::the window did not open (left with $status, picture: $(ls -l window.png 2>&1 | cut -c 1-80)): $(said)"
             exit 1
           fi
       - name: Pack the application (macOS)
