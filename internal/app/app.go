@@ -380,6 +380,8 @@ func (g *Game) takeShot(target *ebiten.Image) {
 				g.song.setBeats(g.song.bar(g.shotAt)+1, 2)
 			case "menu":
 				g.menu = true
+			case "key":
+				g.song.moveKey(2)
 			case "export":
 				for _, kind := range []string{"text", "musicxml", "pdf"} {
 					g.export(g.song, kind)

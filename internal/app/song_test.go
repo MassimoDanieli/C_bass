@@ -298,3 +298,39 @@ func TestReadingRepeatedNotesAgain(t *testing.T) {
 		t.Errorf("undone, the part is not what it was: %d notes", len(s.project.Events))
 	}
 }
+
+// Moving a piece to another key moves its notes, its chords, the name of its key and the
+// pitch it is played at, all by the same amount; a note that would fall off the neck goes an
+// octave away; and it can be taken back.
+func TestAnotherKey(t *testing.T) {
+	os.Setenv("CBASS_NO_AUDIO", "1")
+	s := newSong("demo", demo.Pieces[0].Render()) // the blues in E, which starts on the open E string
+	t.Cleanup(s.player.Close)
+	first, chord := s.project.Events[0].Midi, s.project.Chords[0].Root
+	s.moveKey(2)
+	if s.project.Transpose != 2 || s.player.Pitch() != 2 || s.project.Key != "F#" {
+		t.Fatalf("moved by %d, played %d higher, in %s", s.project.Transpose, s.player.Pitch(), s.project.Key)
+	}
+	if got := s.project.Events[0]; got.Midi != first+2 || got.String < 0 || got.Fret < 0 {
+		t.Errorf("the first note went from %d to %+v", first, got)
+	}
+	if got := s.project.Chords[0].Root; got != (chord+2)%12 {
+		t.Errorf("the first chord went from %d to %d", chord, got)
+	}
+	s.moveKey(-3) // a semitone under where it was: the low E becomes an E flat, off a four-string
+	if got := s.project.Events[0].Midi; got != first-1+12 {
+		t.Errorf("a note under the lowest string is at %d, not an octave up at %d", got, first+11)
+	}
+	for i := 0; i < 10; i++ {
+		s.moveKey(-1)
+	}
+	if s.project.Transpose != -keyRange {
+		t.Errorf("went as far as %d", s.project.Transpose)
+	}
+	for len(s.history) > 0 {
+		s.undo()
+	}
+	if s.project.Transpose != 0 || s.player.Pitch() != 0 || s.project.Events[0].Midi != first || s.project.Key != "E" {
+		t.Errorf("undone: moved by %d, played %d higher, first note %d, in %s", s.project.Transpose, s.player.Pitch(), s.project.Events[0].Midi, s.project.Key)
+	}
+}

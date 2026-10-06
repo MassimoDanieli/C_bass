@@ -34,6 +34,9 @@ type Project struct {
 	Sensitivity float64 `json:"sensitivity,omitempty"`
 	// Key of the piece as a pitch name, when it is known: the pieces that come with the program have one.
 	Key string `json:"key,omitempty"`
+	// Transpose is how many semitones above the recording the part is written, and the
+	// recording played: the piece moved to another key.
+	Transpose int `json:"transpose,omitempty"`
 	// BuiltIn marks a piece that came with the program.
 	BuiltIn bool `json:"builtIn,omitempty"`
 }
@@ -226,7 +229,58 @@ func ReadWith(bass, backing *audio.Buffer, p *Project, sensitivity float64) []tr
 	if frets <= 0 {
 		frets = 12
 	}
-	return read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, sensitivity, nil)
+	events := read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, sensitivity, nil)
+	if p.Transpose != 0 { // the recording is in its own key: the part is written in the one chosen
+		events = shift(events, p.Transpose, fretboard.TuningFor(p.Tuning), frets, p.Low)
+	}
+	return events
+}
+
+// shift moves notes by semitones and finds them a place on the neck again. A note that would
+// fall off the instrument is written an octave away, where it can be played.
+func shift(events []transcribe.Event, semitones int, tuning fretboard.Tuning, frets int, low bool) []transcribe.Event {
+	lowest, highest := tuning.Open[0], tuning.Open[len(tuning.Open)-1]+frets
+	moved := make([]transcribe.Event, len(events))
+	for i, event := range events {
+		event.Midi += semitones
+		for event.Midi < lowest {
+			event.Midi += 12
+		}
+		for event.Midi > highest {
+			event.Midi -= 12
+		}
+		event.Locked = false // the string it was on is no longer where it is played
+		moved[i] = event
+	}
+	if out := fretboard.FingerWith(moved, tuning, frets, low); out != nil {
+		return out
+	}
+	return moved
+}
+
+// MoveKey writes the part so many semitones higher (or lower): notes, chords and the name of
+// the key. The recording has to be played as much higher by whoever plays it.
+func (p *Project) MoveKey(semitones int) {
+	if semitones == 0 {
+		return
+	}
+	frets := p.Frets
+	if frets <= 0 {
+		frets = 12
+	}
+	p.Events = shift(p.Events, semitones, fretboard.TuningFor(p.Tuning), frets, p.Low)
+	chords := append(p.Chords[:0:0], p.Chords...)
+	for i := range chords {
+		chords[i].Root = ((chords[i].Root+semitones)%12 + 12) % 12
+	}
+	p.Chords = chords
+	for midi := 0; midi < 12 && p.Key != ""; midi++ {
+		if fretboard.PitchName(midi) == p.Key {
+			p.Key = fretboard.PitchName(midi + semitones + 120)
+			break
+		}
+	}
+	p.Transpose += semitones
 }
 
 // Harmonise reads the chords of a recording that has none written down yet, from what is left

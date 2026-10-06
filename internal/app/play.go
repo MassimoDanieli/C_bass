@@ -1017,11 +1017,35 @@ func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 	chip("count-in", counting, &g.settings.CountIn, func() {})
 	chip("metronome", g.t("Metronomo", "Metronome"), &g.settings.Metronome, func() { p.SetMetronome(g.settings.Metronome) })
 	chip("quicken", g.t("Più veloce a ogni giro", "Faster every time round"), &g.settings.Quicken, func() { g.applyQuicken(s) })
-	if g.settings.Quicken && !s.loopOn && c.painting() {
-		c.label(g.t("vale quando ripeti un tratto", "works while a stretch repeats"), x+4, y+15, 12, regular, colFaint, left)
+	// the key, at the end of the row: the whole piece a semitone up or down
+	kx := r.x + r.w - 22 - 30
+	if g.button(c, "key-up", rect{kx, y, 30, 30}, "+", plain) {
+		s.moveKey(1)
+		g.saved(s)
+	}
+	moved := "0"
+	if s.project.Transpose != 0 {
+		moved = fmt.Sprintf("%+d", s.project.Transpose)
+	}
+	ink := colText
+	if s.project.Transpose != 0 {
+		ink = colAccent2
+	}
+	c.label(moved, kx-24, y+15, 15, medium, ink, centre)
+	kx -= 48 + 30
+	if g.button(c, "key-down", rect{kx, y, 30, 30}, "−", plain) {
+		s.moveKey(-1)
+		g.saved(s)
+	}
+	label := g.t("Tonalità", "Key")
+	c.label(label, kx-10, y+15, 12, regular, colFaint, right)
+	kx -= 10 + c.width(label, 12, regular) + 16
+	hint := g.t("vale quando ripeti un tratto", "works while a stretch repeats")
+	if g.settings.Quicken && !s.loopOn && x+4+c.width(hint, 12, regular) < kx {
+		c.label(hint, x+4, y+15, 12, regular, colFaint, left)
 	}
 	if p.Silent && c.painting() {
-		c.label(g.t("Nessuna uscita audio: il brano scorre in silenzio.", "No sound output: the recording runs in silence."), r.x+r.w-22, r.y+r.h-16, 12, regular, colDanger, right)
+		c.label(g.t("Nessuna uscita audio: il brano scorre in silenzio.", "No sound output: the recording runs in silence."), r.x+r.w-22, r.y+10, 12, regular, colDanger, right)
 	}
 }
 

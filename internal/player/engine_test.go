@@ -379,3 +379,91 @@ func TestARepeatedStretchQuickens(t *testing.T) {
 		t.Fatalf("after many times round the speed is %.2f, not the 0.90 asked", got)
 	}
 }
+
+// pitchOf is the frequency of a steady tone, from where it crosses zero going up.
+func pitchOf(signal []float32) float64 {
+	first, last, count := -1.0, 0.0, 0
+	for i := 1; i < len(signal); i++ {
+		if signal[i-1] < 0 && signal[i] >= 0 {
+			at := float64(i-1) + float64(-signal[i-1])/float64(signal[i]-signal[i-1])
+			if first < 0 {
+				first = at
+			}
+			last = at
+			count++
+		}
+	}
+	if count < 2 {
+		return 0
+	}
+	return float64(count-1) * Rate / (last - first)
+}
+
+// In another key the recording is higher or lower by so many semitones and takes the time it
+// took: a second of listening is a second of the recording. Back in its own key it is the
+// recording again, sample for sample.
+func TestAnotherKeyKeepsTheTime(t *testing.T) {
+	bass, rest := tone(6, 110, 0.3), silence(6)
+	for _, semitones := range []int{3, -2} {
+		e := NewEngine(bass, rest)
+		e.SetBeats([]float64{1, 2, 3, 4}, []bool{true, false, false, false})
+		e.SetPitch(semitones)
+		if e.Pitch() != semitones || math.Abs(e.Duration()-6) > 1e-9 {
+			t.Fatalf("pitch %d, duration %f", e.Pitch(), e.Duration())
+		}
+		e.SetPlaying(true)
+		out := pull(e, 3*Rate)
+		want := 110 * math.Pow(2, float64(semitones)/12)
+		if got := pitchOf(out[Rate/2:]); math.Abs(got/want-1) > 0.004 {
+			t.Errorf("%+d semitones: %.2f Hz, want %.2f", semitones, got, want)
+		}
+		if at := e.At(2 * Rate); math.Abs(at-2) > 0.05 {
+			t.Errorf("%+d semitones: two seconds in, the place is %.3f", semitones, at)
+		}
+		var peak float32
+		for _, v := range out[Rate:] {
+			peak = max(peak, max(v, -v))
+		}
+		if peak < 0.2 || peak > 0.4 {
+			t.Errorf("%+d semitones: the level went from 0.3 to %.2f", semitones, peak)
+		}
+		e.Seek(4)
+		if at := e.Target(); math.Abs(at-4) > 0.01 {
+			t.Errorf("%+d semitones: sent to 4 s, it is at %.3f", semitones, at)
+		}
+		e.SetLoop(1, 2, true)
+		e.Seek(1.5)
+		pull(e, Rate)
+		if at := e.Target(); at < 1 || at > 2.05 {
+			t.Errorf("%+d semitones: repeating from 1 to 2, it is at %.3f", semitones, at)
+		}
+		e.SetLoop(0, 0, false)
+		e.SetPitch(0)
+		e.Seek(0)
+		back := pull(e, Rate)
+		for i := hop; i < len(back); i++ {
+			if math.Abs(float64(back[i]-bass.Channels[0][i])) > 1e-5 {
+				t.Fatalf("back in its own key, frame %d is %f, not %f", i, back[i], bass.Channels[0][i])
+			}
+		}
+	}
+}
+
+// The metronome still clicks on the beats of the recording when the key is changed.
+func TestTheMetronomeInAnotherKey(t *testing.T) {
+	beats := []float64{0.5, 1.0, 1.5, 2.0, 2.5}
+	e := NewEngine(silence(4), silence(4))
+	e.SetBeats(beats, make([]bool, len(beats)))
+	e.SetMetronome(true)
+	e.SetPitch(4)
+	e.SetPlaying(true)
+	found := starts(pull(e, 3*Rate), 0.05)
+	if len(found) != len(beats) {
+		t.Fatalf("%d clicks for %d beats", len(found), len(beats))
+	}
+	for i, at := range found {
+		if math.Abs(float64(at)/Rate-beats[i]) > 0.03 {
+			t.Errorf("click %d at %.3f, beat at %.3f", i, float64(at)/Rate, beats[i])
+		}
+	}
+}

@@ -48,6 +48,7 @@ func newSong(id string, result *project.Result) *song {
 	}
 	s.write()
 	s.tellBeats()
+	s.player.SetPitch(result.Project.Transpose)
 	return s
 }
 

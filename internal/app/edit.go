@@ -23,6 +23,8 @@ type state struct {
 	downbeat    int
 	beats       []float64
 	sensitivity float64
+	transpose   int
+	key         string
 }
 
 // remember keeps the part as it is now, to come back to.
@@ -37,6 +39,8 @@ func (s *song) remember() {
 		s.pulse.Downbeat,
 		s.pulse.Beats, // never changed in place: a new pulse is made instead
 		s.project.Sensitivity,
+		s.project.Transpose,
+		s.project.Key,
 	})
 }
 
@@ -50,6 +54,10 @@ func (s *song) undo() bool {
 	s.project.Events, s.project.Chords = last.events, last.chords
 	s.pulse.Odd, s.pulse.Downbeat, s.pulse.Beats = last.odd, last.downbeat, last.beats
 	s.project.Sensitivity = last.sensitivity
+	if s.project.Transpose != last.transpose {
+		s.project.Transpose, s.project.Key = last.transpose, last.key
+		s.player.SetPitch(last.transpose)
+	}
 	s.changed()
 	return true
 }
@@ -372,6 +380,28 @@ func (s *song) reread(setting int) {
 		s.project.Events[i].ID = fmt.Sprintf("r-%d-%d", s.made, i)
 	}
 	s.chosen = ""
+	s.changed()
+}
+
+// keyRange is how far from the recording's own key a piece can be moved, either way.
+const keyRange = 6
+
+// moveKey moves the whole piece a semitone up or down: the recording is played higher or
+// lower at the speed it had, and the part, with its chords, is written where it now sounds.
+func (s *song) moveKey(semitones int) {
+	to := s.project.Transpose + semitones
+	if semitones == 0 || to < -keyRange || to > keyRange {
+		return
+	}
+	s.remember()
+	s.project.MoveKey(semitones)
+	for i := range s.project.Events { // a name for any note that lost its own
+		if s.project.Events[i].ID == "" {
+			s.made++
+			s.project.Events[i].ID = fmt.Sprintf("k-%d-%d", s.made, i)
+		}
+	}
+	s.player.SetPitch(s.project.Transpose)
 	s.changed()
 }
 

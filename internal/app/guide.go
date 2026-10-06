@@ -64,6 +64,7 @@ func (g *Game) helpParts() []part {
 			{t("Conta una battuta", "Count a bar in"), t("una battuta di clic prima che il brano parta", "a bar of clicks before the recording starts")},
 			{t("Metronomo", "Metronome"), t("batte i quarti sul tempo vero della registrazione, più forte sull'uno", "clicks the beats on the recording's own tempo, louder on the one")},
 			{t("Più veloce a ogni giro", "Faster every time round"), t("a ogni ripetizione del tratto scelto la velocità sale del 5%, fino al 100%", "at each pass of the repeated stretch the speed goes up by 5%, to 100%")},
+			{t("Tonalità − +", "Key − +"), t("sposta tutto il brano di un semitono, fino a sei: la registrazione suona più alta o più bassa alla velocità di prima, e note e accordi sono scritti dove ora suonano", "moves the whole piece by a semitone, up to six: the recording plays higher or lower at the speed it had, and notes and chords are written where they now sound")},
 			{t("Basso, Il resto", "Bass, The rest"), t("due volumi: basso a zero per suonarci sopra, il resto a zero per sentire solo il basso", "two volumes: bass at zero to play over the rest, the rest at zero to hear the bass alone")},
 		}},
 		{t("Correggere", "Correcting"), [][2]string{
