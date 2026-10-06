@@ -252,3 +252,22 @@ func TestCountingTwiceAsFast(t *testing.T) {
 		t.Errorf("undone, the tempo is %.0f, not %.0f", got, tempo)
 	}
 }
+
+// Moving the beat half a beat later, twice, is one whole beat; and it can be taken back.
+func TestMovingTheBeatHalfway(t *testing.T) {
+	s := testSong(t)
+	first, second := s.pulse.Beats[0], s.pulse.Beats[1]
+	s.offbeat()
+	if got, want := s.pulse.Beats[0], (first+second)/2; got < want-0.002 || got > want+0.002 {
+		t.Fatalf("the first beat is at %.3f, not halfway at %.3f", got, want)
+	}
+	s.offbeat()
+	if got := s.pulse.Beats[0]; got < second-0.003 || got > second+0.003 {
+		t.Errorf("twice halfway is %.3f, not the next beat at %.3f", got, second)
+	}
+	s.undo()
+	s.undo()
+	if s.pulse.Beats[0] != first {
+		t.Errorf("undone, the first beat is at %.3f, not %.3f", s.pulse.Beats[0], first)
+	}
+}

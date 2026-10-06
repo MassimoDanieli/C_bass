@@ -349,6 +349,20 @@ func (r *Rhythm) Rescale(double bool) *Rhythm {
 	return out
 }
 
+// Halfway returns the pulse moved half a beat later: every beat where the "and" after it
+// was. It is for when the pulse was followed on the off-beats, which a shaker, a hi-hat or an
+// off-beat guitar louder than the beats will bring about.
+func (r *Rhythm) Halfway() *Rhythm {
+	out := &Rhythm{PerBar: r.PerBar, Downbeat: r.Downbeat}
+	for i := 0; i+1 < len(r.Beats); i++ {
+		out.Beats = append(out.Beats, math.Round((r.Beats[i]+r.Beats[i+1])*500)/1000)
+	}
+	if n := len(r.Beats); n >= 2 { // and one more, as far after the last as the last two are apart
+		out.Beats = append(out.Beats, math.Round((r.Beats[n-1]+(r.Beats[n-1]-r.Beats[n-2])/2)*1000)/1000)
+	}
+	return out
+}
+
 // Tempo is the typical tempo, in beats per minute.
 func (r *Rhythm) Tempo() float64 {
 	if len(r.Beats) < 2 {

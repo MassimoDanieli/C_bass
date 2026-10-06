@@ -528,6 +528,12 @@ func (g *Game) barControls(c *canvas, v tabView, s *song, now float64) {
 		x -= c.width(text, 12, regular) + 26
 	}
 	// and the whole piece can be counted twice as fast, or half
+	x -= 38
+	if g.button(c, "tempo-offbeat", rect{x, y, 34, 26}, "+½", quiet) {
+		s.offbeat()
+		g.saved(s)
+	}
+	x -= 4
 	for i, double := range []bool{true, false} {
 		x -= 38
 		if g.button(c, []string{"tempo-double", "tempo-half"}[i], rect{x, y, 34, 26}, []string{"×2", "÷2"}[i], quiet) {

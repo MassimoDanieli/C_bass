@@ -80,6 +80,7 @@ func (g *Game) helpParts() []part {
 		{t("Battute e tempo", "Bars and tempo"), [][2]string{
 			{t("stanghette ‹ ›", "bar lines ‹ ›"), t("spostano le battute di un quarto, quando l'«uno» è nel punto sbagliato", "move the bars by a beat, when the \"one\" is in the wrong place")},
 			{t("battuta − +", "bar − +"), t("danno alla battuta in cui ti trovi una lunghezza sua: una battuta in 2/4 dentro un brano in 4/4", "give the bar you are in a length of its own: a 2/4 bar in a 4/4 piece")},
+			{"+½", t("sposta il battito di mezzo quarto, quando è stato seguito sui levare: lo senti dal metronomo che batte in mezzo", "moves the beat half a beat later, when it was followed on the off-beats: you hear it from the metronome clicking in between")},
 			{"÷2  ×2", t("contano il brano alla metà o al doppio del tempo: 87 o 174 è spesso questione di opinione", "count the piece at half or twice the tempo: 87 or 174 is often a matter of opinion")},
 		}},
 		{t("Strumento ed esportazione", "Instrument and export"), [][2]string{

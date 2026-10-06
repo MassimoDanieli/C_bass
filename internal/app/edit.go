@@ -340,6 +340,18 @@ func (s *song) retempo(double bool) {
 	s.changed()
 }
 
+// offbeat moves every beat half a beat later, for a piece whose beat was followed on the
+// "ands". Twice is a whole beat.
+func (s *song) offbeat() {
+	if len(s.pulse.Beats) < 4 {
+		return
+	}
+	s.remember()
+	fresh := s.pulse.Halfway()
+	s.pulse.Beats = fresh.Beats
+	s.changed()
+}
+
 // tellBeats gives the player the beats to click on, the first of each bar marked.
 func (s *song) tellBeats() {
 	strong := make([]bool, len(s.pulse.Beats))
