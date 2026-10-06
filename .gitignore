@@ -4,3 +4,8 @@
 *.cbass.json
 *.tab.txt
 .DS_Store
+/cbass-app
+/C_bass.exe
+/C_bass.app/
+/C_bass.iconset/
+*.png

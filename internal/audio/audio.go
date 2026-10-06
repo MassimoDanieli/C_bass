@@ -62,6 +62,12 @@ func Decode(path string) (*Buffer, error) {
 	if err != nil {
 		return nil, err
 	}
+	return DecodeBytes(data, path)
+}
+
+// DecodeBytes reads a WAV or MP3 file already in memory; the name is only used as a hint and
+// in error messages.
+func DecodeBytes(data []byte, path string) (*Buffer, error) {
 	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
 		return ReadWAV(data)
 	}

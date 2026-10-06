@@ -26,6 +26,10 @@ type Event struct {
 	String int  `json:"string"`
 	Fret   int  `json:"fret"`
 	Locked bool `json:"lockedPosition,omitempty"`
+	// Sure marks a note whose octave was read from the whole of it, clearly: it is not to be
+	// second-guessed from the notes around it. Octaves played in turn are a bass line, not a
+	// misreading to smooth away.
+	Sure   bool `json:"-"`
 	Edited bool `json:"edited,omitempty"`
 }
 
@@ -35,8 +39,34 @@ type Options struct {
 	Isolated bool
 	// Sensitivity to new attacks, from 0.55 (fewer notes) to 0.90 (more); 0.72 if zero.
 	Sensitivity float64
+	// Lowest is the lowest open string of the instrument, as a MIDI note: 28 for a four-string
+	// bass, which is taken if zero. Nothing more than a tone below it is read (a string tuned
+	// down is common, a note the instrument does not have is a misreading of its octave).
+	Lowest int
+	// Floor is a level, as measured by Level, below which nothing is taken for a note. A
+	// bass separated from a recording that has none is not silence but a faint noise, and
+	// measured only against itself the noise would be read as notes.
+	Floor float64
 	// Progress, if set, is called with a value from 0 to 1.
 	Progress func(float64)
+}
+
+// Level is how loud a recording is where it is loud, in the register of the bass: what the
+// level of its separated bass can be held against.
+func Level(buffer *audio.Buffer) float64 {
+	signal, rate := Prepare(buffer)
+	return loudLevel(smoothLevel(signal, rate), rate)
+}
+
+// loudLevel is the level reached by the loudest twentieth of a recording, sampled a hundred
+// times a second.
+func loudLevel(level []float64, rate int) float64 {
+	hop := int(math.Round(float64(rate) * 0.01))
+	env := make([]float64, 0, len(level)/hop+1)
+	for i := 0; i < len(level); i += hop {
+		env = append(env, level[i])
+	}
+	return percentile(env, 0.95)
 }
 
 // Transcribe returns the notes of a recording, in order, with octave slips corrected.
@@ -50,7 +80,11 @@ func Transcribe(buffer *audio.Buffer, options Options) []Event {
 	signal, rate := Prepare(buffer)
 	var events []Event
 	if options.Isolated {
-		events = isolatedNotes(signal, rate, options.Sensitivity, options.Progress)
+		lowest := options.Lowest
+		if lowest == 0 {
+			lowest = 28
+		}
+		events = isolatedNotes(signal, rate, options.Sensitivity, options.Floor, lowest-2, options.Progress)
 	} else {
 		events = mixNotes(signal, rate, options.Sensitivity, buffer.Duration(), options.Progress)
 	}
@@ -129,10 +163,55 @@ func smoothLevel(signal []float32, rate int) []float64 {
 type pitched struct {
 	midi       int
 	confidence float64
+	exact      float64 // the pitch between semitones, where it was measured that finely
 }
 
-// framePitch finds the pitch of a short window by normalised autocorrelation, preferring the
-// shortest period among those that fit almost as well as the best, which is the fundamental.
+// octaveMargin is how much worse a shorter period may fit and still be taken for the
+// fundamental. Twice the true period always fits as well as the period itself, so the
+// shortest good one is the note. But half the period fits nearly as well when the second
+// harmonic is strong, as on the lowest strings, and then the note is read an octave up: the
+// margin cannot be made safe against both, so a single frame is not trusted with the octave.
+// The pitch of a note is read from all its frames together, where the margin is safe.
+const octaveMargin = 0.08
+
+// fundamental picks the period in a curve of how well each lag fits: the shortest lag that
+// peaks within the margin of the best. It returns the lag refined between samples.
+func fundamental(scores []float64, minimumLag, maximumLag int, margin float64) (float64, float64, bool) {
+	bestLag, bestScore := -1, -1.0
+	for lag := minimumLag; lag <= maximumLag; lag++ {
+		if scores[lag] > bestScore {
+			bestScore, bestLag = scores[lag], lag
+		}
+	}
+	if bestScore < 0.5 {
+		return 0, 0, false
+	}
+	chosen := bestLag
+	strong := math.Max(0.6, bestScore-margin)
+	for lag := minimumLag + 1; lag < bestLag; lag++ {
+		if scores[lag] >= strong && scores[lag] >= scores[lag-1] && scores[lag] >= scores[lag+1] {
+			chosen = lag
+			break
+		}
+	}
+	// The top of the peak lies between samples: at the high notes a whole sample is most of a semitone.
+	exact := float64(chosen)
+	if chosen > minimumLag && chosen < maximumLag {
+		before, at, after := scores[chosen-1], scores[chosen], scores[chosen+1]
+		if curve := before - 2*at + after; curve < 0 {
+			exact += clamp(0.5*(before-after)/curve, -0.5, 0.5)
+		}
+	}
+	return exact, scores[chosen], true
+}
+
+// pitchOfLag is the pitch of a period, in semitones on the MIDI scale and fractions of one.
+func pitchOfLag(lag float64, rate int) float64 {
+	return 69 + 12*math.Log2(float64(rate)/lag/440)
+}
+
+// framePitch finds the pitch of a short window by normalised autocorrelation. The curve of
+// how well every lag fits is left in scores.
 func framePitch(signal []float32, rate, start, size, minimumLag, maximumLag int, scores []float64) (pitched, bool) {
 	if start < 0 || start+size+maximumLag > len(signal) {
 		return pitched{}, false
@@ -145,7 +224,6 @@ func framePitch(signal []float32, rate, start, size, minimumLag, maximumLag int,
 		return pitched{}, false
 	}
 	energy := base
-	bestLag, bestScore := -1, -1.0
 	window := signal[start : start+size]
 	for lag := 1; lag <= maximumLag; lag++ {
 		in, gone := float64(signal[start+size+lag-1]), float64(signal[start+lag-1])
@@ -158,34 +236,44 @@ func framePitch(signal []float32, rate, start, size, minimumLag, maximumLag int,
 		for i, v := range window {
 			xy += float64(v) * float64(shifted[i])
 		}
-		score := xy / math.Sqrt(base*energy+1e-20)
-		scores[lag] = score
-		if score > bestScore {
-			bestScore, bestLag = score, lag
-		}
+		scores[lag] = xy / math.Sqrt(base*energy+1e-20)
 	}
-	if bestScore < 0.5 {
+	lag, score, ok := fundamental(scores, minimumLag, maximumLag, octaveMargin)
+	if !ok {
 		return pitched{}, false
 	}
-	chosen := bestLag
-	strong := math.Max(0.6, bestScore*0.92)
-	for lag := minimumLag + 1; lag < bestLag; lag++ {
-		if scores[lag] >= strong && scores[lag] >= scores[lag-1] && scores[lag] >= scores[lag+1] {
-			chosen = lag
-			break
-		}
-	}
-	midi := int(math.Round(69 + 12*math.Log2(float64(rate)/float64(chosen)/440)))
+	exact := pitchOfLag(lag, rate)
+	midi := int(math.Round(exact))
 	if midi < 23 || midi > 76 {
 		return pitched{}, false
 	}
-	return pitched{midi, scores[chosen]}, true
+	return pitched{midi, score, exact}, true
+}
+
+// tuningOf says how far the recording sits from concert pitch, in semitones between -0.5 and
+// 0.5: where its notes fall between the semitones, if they agree on it. A recording a quarter
+// tone flat would otherwise have every note named by the toss of a coin.
+func tuningOf(pitch, sure []float64) float64 {
+	var x, y, weight float64
+	for i, p := range pitch {
+		if p == 0 || sure[i] < 0.9 {
+			continue
+		}
+		angle := 2 * math.Pi * (p - math.Round(p))
+		x += math.Cos(angle)
+		y += math.Sin(angle)
+		weight++
+	}
+	if weight < 50 || math.Hypot(x, y)/weight < 0.5 {
+		return 0 // too little to go on, or no agreement: a fretless played freely
+	}
+	return math.Atan2(y, x) / (2 * math.Pi)
 }
 
 // isolatedNotes follows the note of a bass on its own instead of looking for bursts of energy.
 // A held note keeps its level; a plucked one dips and comes back within a few hundredths of a
 // second; a slurred one changes pitch without either. Those three are told apart here.
-func isolatedNotes(signal []float32, rate int, sensitivity float64, report func(float64)) []Event {
+func isolatedNotes(signal []float32, rate int, sensitivity, floor float64, lowest int, report func(float64)) []Event {
 	hop := int(math.Round(float64(rate) * 0.01))
 	fps := float64(rate) / float64(hop)
 	count := len(signal) / hop
@@ -198,7 +286,7 @@ func isolatedNotes(signal []float32, rate int, sensitivity float64, report func(
 	if reference == 0 {
 		reference = 1e-9
 	}
-	gate := reference * 0.07
+	gate := math.Max(reference*0.07, floor)
 	active := func(i int) bool { return env[i] > gate }
 
 	// How much the level must come back up, within five hundredths of a second, to count as a new attack.
@@ -234,29 +322,39 @@ func isolatedNotes(signal []float32, rate int, sensitivity float64, report func(
 		}
 	}
 	bounds := make(map[int]bool, len(attacks))
+	struck := make(map[int]bool, len(attacks))
 	for _, i := range attacks {
 		bounds[i+2] = true
+		struck[i+2] = true
 	}
 
 	size := int(math.Round(float64(rate) * 0.085))
 	minimumLag := max(2, rate/330)
-	maximumLag := rate / 31
-	scores := make([]float64, maximumLag+1)
-	raw := make([]int, count)
+	// the longest period looked for: half a semitone below the lowest note, and never under 31 Hz
+	maximumLag := min(rate/31, int(float64(rate)/(440*math.Pow(2, (float64(lowest)-0.5-69)/12))))
+	scores := make([]float64, maximumLag+2)
+	raw := make([]float64, count) // the pitch of each frame, between semitones; 0 where there is none
 	sure := make([]float64, count)
+	curves := make([][]float32, count) // how well every lag fits, for the frames with a pitch
 	for i := 0; i < count; i++ {
 		if active(i) {
 			if found, ok := framePitch(signal, rate, i*hop-size/2, size, minimumLag, maximumLag, scores); ok {
-				raw[i], sure[i] = found.midi, found.confidence
+				raw[i], sure[i] = found.exact, found.confidence
+				curve := make([]float32, maximumLag+1)
+				for lag := minimumLag; lag <= maximumLag; lag++ {
+					curve[lag] = float32(scores[lag])
+				}
+				curves[i] = curve
 			}
 		}
 		if i%400 == 0 {
 			report(float64(i) / float64(count))
 		}
 	}
+	tuning := tuningOf(raw, sure)
 	// The median of five frames steadies the pitch.
-	pitch := make([]int, count)
-	near := make([]int, 0, 5)
+	pitch := make([]float64, count)
+	near := make([]float64, 0, 5)
 	for i := 0; i < count; i++ {
 		near = near[:0]
 		for j := max(0, i-2); j <= min(count-1, i+2); j++ {
@@ -265,59 +363,68 @@ func isolatedNotes(signal []float32, rate int, sensitivity float64, report func(
 			}
 		}
 		if len(near) >= 3 {
-			sort.Ints(near)
+			sort.Float64s(near)
 			if len(near)%2 == 1 {
 				pitch[i] = near[len(near)/2]
 			} else {
-				pitch[i] = int(math.Round(float64(near[len(near)/2-1]+near[len(near)/2]) / 2))
+				pitch[i] = (near[len(near)/2-1] + near[len(near)/2]) / 2
 			}
 		}
 	}
-	// A new pitch that holds for four hundredths (twice that for an octave, the usual misreading) starts a note.
-	current, run, candidate := 0, 0, 0
+	// A new note starts where the pitch moves away from where the note has been sitting and
+	// settles somewhere else for four hundredths (twice that for an octave, the usual
+	// misreading). The pitch is followed between semitones: a note played a little flat, as on
+	// a fretless or on a recording not tuned to 440, would otherwise flicker between two
+	// names; and a slide passes through without leaving a note at every fret.
+	const away, settled = 0.7, 0.4
+	current, held, run, candidate := 0.0, 0, 0, 0.0
+	var bottom, top float64
 	for i := 0; i < count; i++ {
 		p := pitch[i]
 		if !active(i) {
-			current, run, candidate = 0, 0, 0
+			current, held, run = 0, 0, 0
 			continue
 		}
 		if p == 0 {
 			continue
 		}
-		if bounds[i] {
-			current, run, candidate = p, 0, 0
+		if bounds[i] || current == 0 {
+			current, held, run = p, 1, 0
 			continue
 		}
-		if current == 0 {
-			current = p
+		if math.Abs(p-current) <= away {
+			run = 0
+			held = min(held+1, 30)
+			current += (p - current) / float64(held)
 			continue
 		}
-		if p != current {
-			if p == candidate {
-				run++
-			} else {
-				run = 1
-			}
-			candidate = p
-			need := 4
-			if (p-current)%12 == 0 {
-				need = 8
-			}
-			if run >= need {
-				bounds[i-run+1] = true
-				current, run, candidate = p, 0, 0
-			}
+		// settled: the frames of the run all within a narrow band, which a pitch on its way
+		// somewhere else never is
+		if run > 0 && math.Max(top, p)-math.Min(bottom, p) <= settled {
+			run++
+			candidate += (p - candidate) / float64(run)
+			bottom, top = math.Min(bottom, p), math.Max(top, p)
 		} else {
-			run, candidate = 0, 0
+			run, candidate, bottom, top = 1, p, p, p
+		}
+		need := 4
+		if octaves := math.Abs(candidate-current) / 12; math.Abs(octaves-math.Round(octaves)) < 0.05 {
+			need = 8
+		}
+		if run >= need {
+			bounds[i-run+1] = true
+			current, held, run = candidate, run, 0
 		}
 	}
 
+	// The stretches between one boundary and the next.
 	type piece struct {
 		from, to   int
 		midi       int
 		confidence float64
+		struck     bool // it starts with an attack, or after a silence
 	}
-	var pieces [][2]int
+	var notes []piece
 	for i := 0; i < count; {
 		if !active(i) {
 			i++
@@ -330,80 +437,149 @@ func isolatedNotes(signal []float32, rate int, sensitivity float64, report func(
 		from := i
 		for k := i + 1; k <= j; k++ {
 			if k == j || bounds[k] {
-				pieces = append(pieces, [2]int{from, k})
+				notes = append(notes, piece{from: from, to: k, struck: from == i || struck[from]})
 				from = k
 			}
 		}
 		i = j
 	}
+	// The pitch of a stretch is read from the whole of it at once: the fit of every lag is
+	// averaged over its frames before the period is chosen. A frame on its own can be fooled,
+	// above all between an octave and the next; the average of a note cannot so easily.
+	mean := make([]float64, maximumLag+2)
+	var within []float64
 	pitchOf := func(from, to int) (int, float64) {
-		votes := map[int]int{}
-		best, bestCount := 0, 0
-		for i := min(from+2, to-1); i < to; i++ {
-			if pitch[i] == 0 {
+		// A frame looks 40 ms each way: near the ends of the stretch it sees the neighbours
+		// too. The ends are left out, as far as the stretch is long enough to spare them.
+		edge := min(4, (to-from)/3)
+		first, last := from+edge, to-edge
+		// Nor do the frames on their way to another pitch count, in a slide or a bend: only
+		// those that sit where most of the stretch sits, in whatever octave they were read.
+		within = within[:0]
+		for i := first; i < last; i++ {
+			if raw[i] != 0 {
+				within = append(within, raw[i])
+			}
+		}
+		if len(within) == 0 {
+			return 0, 0
+		}
+		sort.Float64s(within)
+		middle := within[len(within)/2]
+		for lag := range mean {
+			mean[lag] = 0
+		}
+		frames := 0
+		for i := first; i < last; i++ {
+			if curves[i] == nil {
 				continue
 			}
-			votes[pitch[i]]++
-			if c := votes[pitch[i]]; c > bestCount || (c == bestCount && pitch[i] < best) {
-				best, bestCount = pitch[i], c
+			if off := math.Abs(raw[i] - middle); math.Abs(off-12*math.Round(off/12)) > away {
+				continue
 			}
-		}
-		var total float64
-		n := 0
-		for i := from; i < to; i++ {
-			if sure[i] != 0 {
-				total += sure[i]
-				n++
+			for lag := minimumLag; lag <= maximumLag; lag++ {
+				mean[lag] += float64(curves[i][lag])
 			}
+			frames++
 		}
-		if n == 0 {
-			return best, 0
+		for lag := minimumLag; lag <= maximumLag; lag++ {
+			mean[lag] /= float64(frames)
 		}
-		return best, total / float64(n)
+		lag, score, ok := fundamental(mean, minimumLag, maximumLag, octaveMargin)
+		if !ok {
+			return 0, 0
+		}
+		midi := int(math.Round(pitchOfLag(lag, rate) - tuning))
+		if midi < 23 || midi > 76 {
+			return 0, 0
+		}
+		return midi, score
 	}
-	const minimum = 5
-	var notes []piece
-	for _, p := range pieces {
-		from, to := p[0], p[1]
-		midi, confidence := pitchOf(from, to)
-		// A fragment too short to be a note belongs to its neighbour, which keeps the pitch of the longer part.
-		if n := len(notes); n > 0 && notes[n-1].to == from && (to-from < minimum || notes[n-1].to-notes[n-1].from < minimum) {
-			last := notes[n-1]
-			if last.to-last.from >= to-from && last.midi != 0 {
-				notes[n-1] = piece{last.from, to, last.midi, last.confidence}
-			} else {
-				notes[n-1] = piece{last.from, to, midi, confidence}
+	for k := range notes {
+		notes[k].midi, notes[k].confidence = pitchOf(notes[k].from, notes[k].to)
+	}
+
+	// Boundaries that are not the start of a note are taken out, until none is left.
+	const (
+		fragment = 5  // hundredths: too short to be anything
+		short    = 8  // too short to be a note unless it is clearly one
+		blur     = 10 // how long the start of a note can take to settle on its pitch
+		release  = 12 // how long its end can take to die away
+		steady   = 30 // long enough for what was read to be what was played
+	)
+	length := func(p piece) int { return p.to - p.from }
+	join := func(k int, midi int, confidence float64) { // k and k+1 become one
+		notes[k] = piece{notes[k].from, notes[k+1].to, midi, confidence, notes[k].struck || (length(notes[k]) < blur && notes[k+1].struck)}
+		notes = append(notes[:k+1], notes[k+2:]...)
+	}
+	for changed := true; changed; {
+		changed = false
+		for k := 0; k+1 < len(notes); k++ {
+			a, b := notes[k], notes[k+1]
+			if a.to != b.from {
+				continue
 			}
-			continue
+			lastOfRun := k+2 >= len(notes) || notes[k+2].from != b.to
+			switch {
+			case b.midi == 0:
+				// no pitch: the note before rings on
+				join(k, a.midi, a.confidence)
+			case a.midi == 0:
+				join(k, b.midi, b.confidence)
+			case a.midi == b.midi && (!b.struck || length(a) < short):
+				// the same note, and nothing struck in between: the two halves of one attack
+				midi, confidence := pitchOf(a.from, b.to)
+				if midi != a.midi {
+					midi, confidence = a.midi, math.Max(a.confidence, b.confidence)
+				}
+				join(k, midi, confidence)
+			case pitchClass(a.midi) == pitchClass(b.midi) && !b.struck:
+				// The same note an octave away, and nothing struck in between: one note. No
+				// hand jumps an octave without plucking; it is the sound that changes. A string
+				// just struck can rattle so that every other wave differs, and looks an octave
+				// lower; left ringing it loses its fundamental, and looks an octave higher. Sound
+				// at the lower octave is evidence, its absence is not: where the lower one held
+				// for a good while it is the note. Otherwise the note is what fits the whole.
+				midi, confidence := pitchOf(a.from, b.to)
+				low := a
+				if b.midi < a.midi {
+					low = b
+				}
+				switch {
+				case length(low) >= steady:
+					// long enough to be no accident: the lower octave was really there
+					midi, confidence = low.midi, low.confidence
+				case pitchClass(midi) != pitchClass(a.midi):
+					midi, confidence = a.midi, a.confidence
+					if length(b) > length(a) {
+						midi, confidence = b.midi, b.confidence
+					}
+				}
+				join(k, midi, confidence)
+			case length(a) < fragment || (length(a) < blur && !b.struck && a.confidence < 0.85 && length(b) >= 2*length(a)):
+				// the blur at the start of the next note: its pitch settles without anything
+				// being struck again. A short note before a struck one is a note.
+				join(k, b.midi, b.confidence)
+			case (length(b) < fragment && (!b.struck || lastOfRun)) || (!b.struck && lastOfRun && (length(b) < short || (length(b) < release && b.confidence < 0.9))):
+				// the pitch drifting as the note dies away
+				join(k, a.midi, a.confidence)
+			default:
+				continue
+			}
+			changed = true
+			k--
 		}
-		if midi == 0 || to-from < minimum {
-			continue
-		}
-		notes = append(notes, piece{from, to, midi, confidence})
 	}
-	// Two leftovers that are not notes: the blur of a slide into the next note, and a blip on its own in silence.
-	var kept []piece
-	for k := 0; k < len(notes); k++ {
-		note := notes[k]
-		short := note.to-note.from < 8
-		hasNext := k+1 < len(notes) && notes[k+1].from == note.to
-		if short && hasNext && notes[k+1].midi != note.midi && abs(notes[k+1].midi-note.midi) <= 2 {
-			notes[k+1].from = note.from
-			continue
-		}
-		if short && !hasNext && !(len(kept) > 0 && kept[len(kept)-1].to == note.from) {
-			continue
-		}
-		kept = append(kept, note)
-	}
-	events := make([]Event, 0, len(kept))
-	for _, note := range kept {
-		if note.midi == 0 {
-			continue
+	events := make([]Event, 0, len(notes))
+	for k, note := range notes {
+		alone := !(k > 0 && notes[k-1].to == note.from) && !(k+1 < len(notes) && notes[k+1].from == note.to)
+		if note.midi == 0 || length(note) < fragment || (alone && length(note) < short) {
+			continue // a blip on its own in silence
 		}
 		events = append(events, Event{
 			Start: float64(note.from) / fps, End: float64(note.to) / fps,
 			Midi: note.midi, RawMidi: note.midi, Confidence: clamp(note.confidence, 0, 1), String: -1,
+			Sure: note.confidence >= 0.75 && length(note) >= short,
 		})
 	}
 	return events
@@ -506,7 +682,7 @@ func estimateWindow(signal []float32, rate, start, size int) (pitched, bool) {
 	if midi < 23 || midi > 76 {
 		return pitched{}, false
 	}
-	return pitched{midi, bestScore}, true
+	return pitched{midi: midi, confidence: bestScore}, true
 }
 
 // analysisOffsets are the places inside a note, as fractions of its length, where its pitch is read.
@@ -549,7 +725,7 @@ func selectVotes(votes []pitched) pitched {
 			best, bestRank, bestConfidence = midi, rank, confidence
 		}
 	}
-	return pitched{best, bestConfidence}
+	return pitched{midi: best, confidence: bestConfidence}
 }
 
 func mixNotes(signal []float32, rate int, sensitivity, duration float64, report func(float64)) []Event {
@@ -670,6 +846,9 @@ func StabilizeOctaves(events []Event) []Event {
 			back[i][c] = -1
 			octaves := math.Abs(float64(candidate-event.Midi)) / 12
 			observation := octaves*(1.1+confidence*3.2) + math.Abs(float64(candidate-36))*0.006
+			if event.Sure && octaves > 0 {
+				observation += 100 // its octave was read from the whole note, and is not up for discussion
+			}
 			if i == 0 {
 				costs[i][c] = observation
 				continue
