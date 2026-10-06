@@ -62,9 +62,11 @@ jobs:
             name: cbass-windows-x64
             binary: cbass.exe
             app: C_bass-windows-x64
-          - os: ubuntu-latest
+          # an older Ubuntu on purpose: what is built there runs on newer systems, not the other way round
+          - os: ubuntu-22.04
             name: cbass-linux-x64
             binary: cbass
+            app: C_bass-linux-x64
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: '1'
@@ -73,9 +75,18 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # The version is the name given to a draft release, or else the commit.
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          version="${{ inputs.draft }}"
+          version="${version#v}"
+          if [ -z "$version" ]; then version="0.0.0-$(git rev-parse --short HEAD)"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Build
         shell: bash
-        run: go build -trimpath -ldflags "-s -w -X main.version=$(git rev-parse --short HEAD)" -o "${{ matrix.binary }}" ./cmd/cbass
+        run: go build -trimpath -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }}" -o "${{ matrix.binary }}" ./cmd/cbass
       - name: Keep the model between runs
         uses: actions/cache@v5
         with:
@@ -108,7 +119,7 @@ jobs:
       - name: Build the application (macOS)
         if: runner.os == 'macOS'
         run: |
-          version=$(git rev-parse --short HEAD)
+          version="${{ steps.version.outputs.version }}"
           app=C_bass.app/Contents
           mkdir -p "$app/MacOS" "$app/Resources"
           go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$app/MacOS/C_bass" ./cmd/cbass-app
@@ -120,8 +131,18 @@ jobs:
       - name: Build the application (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$(git rev-parse --short HEAD)" -o C_bass.exe ./cmd/cbass-app
-      # Opened for real on this machine, on a made-up recording, and a picture of it kept.
+        run: |
+          # the icon goes into the program itself, as a resource the linker picks up
+          go run ./tools/icon C_bass.ico
+          go run github.com/akavel/rsrc@v0.10.2 -arch amd64 -ico C_bass.ico -o cmd/cbass-app/rsrc_windows_amd64.syso
+          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=${{ steps.version.outputs.version }}" -o C_bass.exe ./cmd/cbass-app
+      - name: Build the application (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev xvfb
+          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }}" -o c-bass ./cmd/cbass-app
+      # Opened for real on this machine, on one of the pieces that come with it, and a picture kept.
       - name: Open the window
         if: matrix.app
         shell: bash
@@ -134,14 +155,17 @@ jobs:
           go run ./tools/demosong
           # by its full path: inside an application bundle macOS starts the program in another folder
           export CBASS_SHOT="$PWD/window.png"
-          if [ "$RUNNER_OS" = macOS ]; then program=C_bass.app/Contents/MacOS/C_bass; else program=./C_bass.exe; fi
-          "$program" > window.log 2>&1 &
+          case "$RUNNER_OS" in
+            macOS) C_bass.app/Contents/MacOS/C_bass > window.log 2>&1 & ;;
+            Windows) ./C_bass.exe > window.log 2>&1 & ;;
+            Linux) xvfb-run -a -s "-screen 0 1280x860x24" ./c-bass > window.log 2>&1 & ;;
+          esac
           pid=$!
           for i in $(seq 1 90); do
             if ! kill -0 $pid 2>/dev/null; then break; fi
             sleep 1
           done
-          said() { echo "$(grep -c nextDrawable window.log || true) frames without a drawable; $(grep -v nextDrawable window.log | tail -8 | tr '\n' ' ' | cut -c 1-800)"; }
+          said() { echo "$(grep -c nextDrawable window.log || true) frames without a drawable; $(grep -v -e nextDrawable -e ALSA window.log | tail -8 | tr '\n' ' ' | cut -c 1-800)"; }
           if kill -0 $pid 2>/dev/null; then
             kill $pid
             echo "::error title=${{ matrix.app }}::the window never drew: $(said)"
@@ -153,19 +177,93 @@ jobs:
             echo "::error title=${{ matrix.app }}::the window did not open (left with $status, picture: $(ls -l window.png 2>&1 | cut -c 1-80)): $(said)"
             exit 1
           fi
+
+      # What people download: a disk image for macOS, an installer for Windows, a package and an
+      # archive for Linux. Each is tried here: installed, started, and taken away again.
       - name: Pack the application (macOS)
         if: runner.os == 'macOS'
-        run: ditto -c -k --keepParent C_bass.app C_bass-macos-arm64.zip
+        run: |
+          ditto -c -k --keepParent C_bass.app C_bass-macos-arm64.zip
+          mkdir dmg
+          cp -R C_bass.app dmg/
+          ln -s /Applications dmg/Applications
+          for attempt in 1 2 3; do # the build machines sometimes hold the folder busy for a moment
+            if hdiutil create -volname C_bass -srcfolder dmg -ov -format UDZO C_bass-macos-arm64.dmg; then break; fi
+            sleep 5
+          done
+          hdiutil verify C_bass-macos-arm64.dmg
+          hdiutil attach -nobrowse -readonly -mountpoint mounted C_bass-macos-arm64.dmg
+          test -x mounted/C_bass.app/Contents/MacOS/C_bass
+          test -L mounted/Applications
+          codesign --verify --deep --strict mounted/C_bass.app
+          hdiutil detach mounted
+      - name: Pack the application (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CBASS_LIBRARY: ${{ runner.temp }}\library
+          CBASS_NO_AUDIO: '1'
+          CBASS_OPEN: demo-blues
+          CBASS_SHOT: ${{ runner.temp }}\installed.png
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DSource=$PWD\C_bass.exe" "/DIcon=$PWD\C_bass.ico" packaging\C_bass.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # install it as a person would, without the questions
+          Start-Process -Wait .\C_bass-windows-x64-setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER'
+          $installed = "$env:LOCALAPPDATA\Programs\C_bass\C_bass.exe"
+          if (-not (Test-Path $installed)) { Write-Host "::error::the installer did not put the program in $installed"; exit 1 }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\C_bass.lnk")) { Write-Host "::error::no entry in the Start menu"; exit 1 }
+          $running = Start-Process $installed -PassThru
+          if (-not $running.WaitForExit(90000)) { $running.Kill(); Write-Host "::error::the installed program never drew its window"; exit 1 }
+          if (-not (Test-Path $env:CBASS_SHOT)) { Write-Host "::error::the installed program left no picture"; exit 1 }
+          # and take it away again
+          Start-Process -Wait "$env:LOCALAPPDATA\Programs\C_bass\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if (Test-Path $installed) { Write-Host "::error::the program is still there after uninstalling"; exit 1 }
+      - name: Pack the application (Linux)
+        if: runner.os == 'Linux'
+        env:
+          CBASS_LIBRARY: ${{ runner.temp }}/library
+          CBASS_NO_AUDIO: '1'
+          CBASS_OPEN: demo-blues
+        run: |
+          sh packaging/linux.sh ./c-bass "${{ steps.version.outputs.version }}" dist
+          # the package: installed with what it says it needs, started, removed
+          sudo apt-get install -y ./dist/C_bass-linux-x64.deb
+          test "$(command -v c-bass)" = /usr/bin/c-bass
+          CBASS_SHOT="$PWD/installed.png" timeout 120 xvfb-run -a -s "-screen 0 1280x860x24" c-bass
+          test -s installed.png
+          sudo apt-get remove -y c-bass
+          ! command -v c-bass
+          # the archive: installed in a home of its own, started, removed
+          mkdir home && tar -xzf dist/C_bass-linux-x64.tar.gz -C home
+          HOME="$PWD/home" sh home/C_bass-linux-x64/install.sh
+          CBASS_SHOT="$PWD/installed-archive.png" timeout 120 xvfb-run -a -s "-screen 0 1280x860x24" home/.local/bin/c-bass
+          test -s installed-archive.png
+          HOME="$PWD/home" sh home/C_bass-linux-x64/install.sh --remove
+          test ! -e home/.local/bin/c-bass
       - uses: actions/upload-artifact@v6
         if: runner.os == 'macOS'
         with:
           name: ${{ matrix.app }}
-          path: C_bass-macos-arm64.zip
+          path: |
+            C_bass-macos-arm64.dmg
+            C_bass-macos-arm64.zip
       - uses: actions/upload-artifact@v6
         if: runner.os == 'Windows'
         with:
           name: ${{ matrix.app }}
-          path: C_bass.exe
+          path: |
+            C_bass-windows-x64-setup.exe
+            C_bass.exe
+      - uses: actions/upload-artifact@v6
+        if: runner.os == 'Linux'
+        with:
+          name: ${{ matrix.app }}
+          path: |
+            dist/C_bass-linux-x64.deb
+            dist/C_bass-linux-x64.tar.gz
       - uses: actions/upload-artifact@v6
         if: matrix.app
         with:
@@ -191,9 +289,22 @@ jobs:
           TAG: ${{ inputs.draft }}
         run: |
           mkdir out
+          cp built/C_bass-macos-arm64/C_bass-macos-arm64.dmg out/
           cp built/C_bass-macos-arm64/C_bass-macos-arm64.zip out/
-          cp built/C_bass-windows-x64/C_bass.exe out/C_bass-windows-x64.exe
+          cp built/C_bass-windows-x64/C_bass-windows-x64-setup.exe out/
+          cp built/C_bass-windows-x64/C_bass.exe out/C_bass-windows-x64-portable.exe
+          cp built/C_bass-linux-x64/C_bass-linux-x64.deb out/
+          cp built/C_bass-linux-x64/C_bass-linux-x64.tar.gz out/
+          cat > notes.md <<'END'
+          | | |
+          |---|---|
+          | **macOS** (Apple Silicon) | `C_bass-macos-arm64.dmg`: open it and drag C_bass to Applications |
+          | **Windows** (64-bit) | `C_bass-windows-x64-setup.exe`: the installer, for your user only, no administrator needed. `C_bass-windows-x64-portable.exe` runs without installing |
+          | **Linux** (64-bit) | `C_bass-linux-x64.deb` for Debian, Ubuntu, Mint: `sudo apt install ./C_bass-linux-x64.deb`. `C_bass-linux-x64.tar.gz` for the others: unpack and run `./install.sh` |
+
+          None of these is signed with a paid certificate, so the system asks before the first start. macOS: System Settings → Privacy & Security → Open Anyway. Windows: More info → Run anyway.
+
+          *Nessuno di questi è firmato con un certificato a pagamento, quindi al primo avvio il sistema chiede conferma. macOS: Impostazioni di Sistema → Privacy e sicurezza → Apri comunque. Windows: Ulteriori informazioni → Esegui comunque.*
+          END
           gh release delete "$TAG" --yes 2>/dev/null || true
-          gh release create "$TAG" --draft --prerelease --target "$GITHUB_SHA" --title "C_bass $TAG" \
-            --notes "macOS (Apple Silicon): C_bass-macos-arm64.zip. Windows: C_bass-windows-x64.exe." \
-            out/*
+          gh release create "$TAG" --draft --prerelease --target "$GITHUB_SHA" --title "C_bass $TAG" --notes-file notes.md out/*

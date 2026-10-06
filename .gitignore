@@ -9,3 +9,11 @@
 /C_bass.app/
 /C_bass.iconset/
 *.png
+/c-bass
+/C_bass.ico
+/dist/
+/dmg/
+*.dmg
+*.deb
+*.syso
+*-setup.exe
