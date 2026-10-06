@@ -126,9 +126,10 @@ jobs:
           CBASS_NO_AUDIO: '1'
           CBASS_OPEN: demo
           CBASS_SHOT_AT: '9.3'
-          CBASS_SHOT: window.png
         run: |
           go run ./tools/demosong
+          # by its full path: inside an application bundle macOS starts the program in another folder
+          export CBASS_SHOT="$PWD/window.png"
           if [ "$RUNNER_OS" = macOS ]; then program=C_bass.app/Contents/MacOS/C_bass; else program=./C_bass.exe; fi
           "$program" > window.log 2>&1 &
           pid=$!
