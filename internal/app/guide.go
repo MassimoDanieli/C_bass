@@ -284,10 +284,10 @@ func (g *Game) aboutPage(whole, c *canvas, body rect) float32 {
 
 	heading(t("Fatto con", "Made with"))
 	for _, credit := range [][3]string{
-		{"Demucs", t("la rete che separa il basso, di Alexandre Défossez e colleghi (Meta). Il codice è MIT; i pesi sono stati allenati anche su MUSDB18, che è concesso per uso non commerciale e di ricerca.",
-			"the network that separates the bass, by Alexandre Défossez and colleagues (Meta). The code is MIT; the weights were trained on MUSDB18 among others, which is licensed for non-commercial and research use."), "https://github.com/facebookresearch/demucs"},
+		{"Demucs", t("la rete che separa il basso, di Alexandre Défossez e colleghi (Meta). Il codice è MIT; i pesi sono resi disponibili solo per uso personale e di ricerca.",
+			"the network that separates the bass, by Alexandre Défossez and colleagues (Meta). The code is MIT; the weights are made available for personal and research use only."), "https://github.com/facebookresearch/demucs"},
 		{"ONNX Runtime", t("fa girare la rete (Microsoft, MIT)", "runs the network (Microsoft, MIT)"), "https://onnxruntime.ai"},
-		{"demucs-js", t("da cui viene l'elaborazione del segnale attorno alla rete, di Kevin Gibbons (MIT)", "where the signal processing around the network comes from, by Kevin Gibbons (MIT)"), "https://github.com/bakkot/demucs-js"},
+		{"demucs-js", t("da cui vengono la rete in formato ONNX e l'elaborazione del segnale attorno, di Kevin Gibbons (MIT)", "where the network in ONNX form and the signal processing around it come from, by Kevin Gibbons (MIT)"), "https://github.com/bakkot/demucs-js"},
 		{"Ebitengine", t("la finestra e il suono, di Hajime Hoshi (Apache 2.0)", "the window and the sound, by Hajime Hoshi (Apache 2.0)"), "https://ebitengine.org"},
 		{"Go", t("il linguaggio, e i caratteri Go (BSD)", "the language, and the Go fonts (BSD)"), "https://go.dev"},
 		{"go-mp3, mewkiz/flac", t("leggono MP3 e FLAC", "read MP3 and FLAC"), "https://github.com/mewkiz/flac"},
