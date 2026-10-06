@@ -229,3 +229,26 @@ func TestCorrectingChordsAndBars(t *testing.T) {
 		t.Fatalf("after undoing, bar 3 starts at %.2f", got)
 	}
 }
+
+// Counting a piece twice as fast and then half as fast leaves it as it was; and the change
+// can be taken back.
+func TestCountingTwiceAsFast(t *testing.T) {
+	s := testSong(t)
+	tempo, bars, notes := s.pulse.Tempo(), s.lastBar(), len(s.project.Events)
+	s.retempo(true)
+	if got := s.pulse.Tempo(); got < tempo*1.9 || got > tempo*2.1 {
+		t.Fatalf("twice %.0f is not %.0f", tempo, got)
+	}
+	if got := s.lastBar(); got < bars*2-1 || got > bars*2+2 {
+		t.Errorf("%d bars became %d", bars, got)
+	}
+	s.retempo(false)
+	if got := s.pulse.Tempo(); got < tempo*0.97 || got > tempo*1.03 {
+		t.Errorf("back to %.0f, not %.0f", got, tempo)
+	}
+	s.undo()
+	s.undo()
+	if got := s.pulse.Tempo(); got < tempo*0.99 || got > tempo*1.01 || len(s.project.Events) != notes {
+		t.Errorf("undone, the tempo is %.0f, not %.0f", got, tempo)
+	}
+}

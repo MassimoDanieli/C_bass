@@ -146,35 +146,9 @@ func Find(backing *audio.Buffer, pulse *rhythm.Rhythm, bass []transcribe.Event) 
 	frames := chroma(backing)
 	beats := pulse.Beats
 	count := len(beats) - 1
-	// what sounds on each beat: the chroma of its frames, and the notes of the bass in it
-	heard := make([][12]float64, count)
+	// what sounds on each beat, and the notes of the bass in it
+	heard, loud := onBeats(frames, beats)
 	low := make([][12]float64, count)
-	loud := make([]float64, count)
-	for b := 0; b < count; b++ {
-		// the frames whose middle falls in the beat: a frame is longer than its step, and
-		// taken by its start it would hear the next chord coming
-		from := int(math.Ceil((beats[b]*rate - size/2) / hop))
-		to := int(math.Ceil((beats[b+1]*rate - size/2) / hop))
-		for f := max(0, from); f < to && f < len(frames); f++ {
-			for c := 0; c < 12; c++ {
-				heard[b][c] += frames[f][c]
-			}
-		}
-		var least, sum float64 = math.Inf(1), 0
-		for c := 0; c < 12; c++ {
-			least = math.Min(least, heard[b][c])
-		}
-		for c := 0; c < 12; c++ {
-			heard[b][c] -= least // what every pitch class has alike is drums and noise
-			sum += heard[b][c] * heard[b][c]
-		}
-		loud[b] = math.Sqrt(sum)
-		if sum > 0 {
-			for c := 0; c < 12; c++ {
-				heard[b][c] /= math.Sqrt(sum)
-			}
-		}
-	}
 	first := func(b int) bool { // is this beat the first of its bar?
 		page := float64(b - pulse.Downbeat)
 		return pulse.BarStart(pulse.BarAt(page)) == int(page)

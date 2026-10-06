@@ -519,8 +519,21 @@ func (g *Game) barControls(c *canvas, v tabView, s *song, now float64) {
 		if beats != s.perBar {
 			ink = colAccent2
 		}
-		c.label(fmt.Sprintf("%s %d: %d/4", g.t("battuta", "bar"), bar+1, beats), x, y+13, 12, regular, ink, right)
+		text := fmt.Sprintf("%s %d: %d/4", g.t("battuta", "bar"), bar+1, beats)
+		c.label(text, x, y+13, 12, regular, ink, right)
+		x -= c.width(text, 12, regular) + 26
 	}
+	// and the whole piece can be counted twice as fast, or half
+	for i, double := range []bool{true, false} {
+		x -= 38
+		if g.button(c, []string{"tempo-double", "tempo-half"}[i], rect{x, y, 34, 26}, []string{"×2", "÷2"}[i], quiet) {
+			s.retempo(double)
+			g.saved(s)
+		}
+		x -= 4
+	}
+	x -= 6
+	c.label(fmt.Sprintf("%.0f BPM", s.pulse.Tempo()), x, y+13, 12, regular, colFaint, right)
 }
 
 // editBar is under the staff: what can be done to the note or the chord chosen, and what
