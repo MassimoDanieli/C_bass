@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/MassimoDanieli/c_bass/internal/chords"
+	"github.com/MassimoDanieli/c_bass/internal/demo"
 	"math"
 	"os"
 	"testing"
@@ -250,5 +251,123 @@ func TestCountingTwiceAsFast(t *testing.T) {
 	s.undo()
 	if got := s.pulse.Tempo(); got < tempo*0.99 || got > tempo*1.01 || len(s.project.Events) != notes {
 		t.Errorf("undone, the tempo is %.0f, not %.0f", got, tempo)
+	}
+}
+
+// Moving the beat half a beat later, twice, is one whole beat; and it can be taken back.
+func TestMovingTheBeatHalfway(t *testing.T) {
+	s := testSong(t)
+	first, second := s.pulse.Beats[0], s.pulse.Beats[1]
+	s.offbeat()
+	if got, want := s.pulse.Beats[0], (first+second)/2; got < want-0.002 || got > want+0.002 {
+		t.Fatalf("the first beat is at %.3f, not halfway at %.3f", got, want)
+	}
+	s.offbeat()
+	if got := s.pulse.Beats[0]; got < second-0.003 || got > second+0.003 {
+		t.Errorf("twice halfway is %.3f, not the next beat at %.3f", got, second)
+	}
+	s.undo()
+	s.undo()
+	if s.pulse.Beats[0] != first {
+		t.Errorf("undone, the first beat is at %.3f, not %.3f", s.pulse.Beats[0], first)
+	}
+}
+
+// Reading the notes again with another setting for repeated notes gives a part read from the
+// sound, remembers the setting, and can be taken back.
+func TestReadingRepeatedNotesAgain(t *testing.T) {
+	os.Setenv("CBASS_NO_AUDIO", "1")
+	s := newSong("demo", demo.Pieces[4].Render()) // the rock piece: straight eighths on one note
+	t.Cleanup(s.player.Close)
+	written := len(s.project.Events)
+	s.transpose(0, 1)
+	s.reread(2)
+	if s.repeats() != 2 || s.project.Sensitivity == 0 {
+		t.Fatalf("the setting was not kept: %v", s.project.Sensitivity)
+	}
+	if got := len(s.project.Events); got < written*9/10 || got > written*11/10 {
+		t.Errorf("%d notes written, %d read", written, got)
+	}
+	for _, event := range s.project.Events {
+		if event.ID == "" || event.String < 0 {
+			t.Fatalf("a note read again has no name or no place: %+v", event)
+		}
+	}
+	s.undo()
+	if len(s.project.Events) != written || !s.project.Events[0].Edited || s.repeats() != 0 {
+		t.Errorf("undone, the part is not what it was: %d notes", len(s.project.Events))
+	}
+}
+
+// Moving a piece to another key moves its notes, its chords, the name of its key and the
+// pitch it is played at, all by the same amount; a note that would fall off the neck goes an
+// octave away; and it can be taken back.
+func TestAnotherKey(t *testing.T) {
+	os.Setenv("CBASS_NO_AUDIO", "1")
+	s := newSong("demo", demo.Pieces[0].Render()) // the blues in E, which starts on the open E string
+	t.Cleanup(s.player.Close)
+	first, chord := s.project.Events[0].Midi, s.project.Chords[0].Root
+	s.moveKey(2)
+	if s.project.Transpose != 2 || s.player.Pitch() != 2 || s.project.Key != "F#" {
+		t.Fatalf("moved by %d, played %d higher, in %s", s.project.Transpose, s.player.Pitch(), s.project.Key)
+	}
+	if got := s.project.Events[0]; got.Midi != first+2 || got.String < 0 || got.Fret < 0 {
+		t.Errorf("the first note went from %d to %+v", first, got)
+	}
+	if got := s.project.Chords[0].Root; got != (chord+2)%12 {
+		t.Errorf("the first chord went from %d to %d", chord, got)
+	}
+	s.moveKey(-3) // a semitone under where it was: the low E becomes an E flat, off a four-string
+	if got := s.project.Events[0].Midi; got != first-1+12 {
+		t.Errorf("a note under the lowest string is at %d, not an octave up at %d", got, first+11)
+	}
+	for i := 0; i < 10; i++ {
+		s.moveKey(-1)
+	}
+	if s.project.Transpose != -keyRange {
+		t.Errorf("went as far as %d", s.project.Transpose)
+	}
+	for len(s.history) > 0 {
+		s.undo()
+	}
+	if s.project.Transpose != 0 || s.player.Pitch() != 0 || s.project.Events[0].Midi != first || s.project.Key != "E" {
+		t.Errorf("undone: moved by %d, played %d higher, first note %d, in %s", s.project.Transpose, s.player.Pitch(), s.project.Events[0].Midi, s.project.Key)
+	}
+}
+
+// Sections: one starts at the bar the player is in, can be renamed, repeated and removed,
+// and lasts until the next.
+func TestSections(t *testing.T) {
+	s := testSong(t) // 120 BPM in four: a bar every two seconds
+	if i := s.sectionAdd(0.5); i != 0 || s.project.Sections[0].Kind != "intro" || s.project.Sections[0].Start != 0 {
+		t.Fatalf("the first section: %d, %+v", i, s.project.Sections)
+	}
+	if i := s.sectionAdd(5); i != 1 || s.project.Sections[1].Kind != "verse" || math.Abs(s.project.Sections[1].Start-4) > 0.01 {
+		t.Fatalf("the second section: %d, %+v", i, s.project.Sections)
+	}
+	if i := s.sectionAdd(4.5); i != -1 {
+		t.Error("a second section was started on the same bar")
+	}
+	if i := s.sectionAdd(2.5); i != 1 || len(s.project.Sections) != 3 { // one in between goes in between
+		t.Fatalf("a section in between: %d, %+v", i, s.project.Sections)
+	}
+	s.sectionKind(1)
+	if got := s.project.Sections[1].Kind; got != "prechorus" {
+		t.Errorf("the name after verse is %s", got)
+	}
+	if s.sectionAt(3) != 1 || s.sectionAt(4.2) != 2 || math.Abs(s.sectionEnd(1)-4) > 0.01 || s.sectionEnd(2) != s.player.Duration() {
+		t.Errorf("at 3 s section %d, at 4.2 s section %d, the second ends at %.2f", s.sectionAt(3), s.sectionAt(4.2), s.sectionEnd(1))
+	}
+	s.sectionRepeat(1)
+	if !s.loopOn || s.loopA != 1 || s.loopB != 1 {
+		t.Errorf("repeating the second section repeats bars %d to %d", s.loopA+1, s.loopB+1)
+	}
+	s.sectionRemove(0)
+	if len(s.project.Sections) != 2 || s.project.Sections[0].Kind != "prechorus" {
+		t.Errorf("after removing the first: %+v", s.project.Sections)
+	}
+	s.undo()
+	if len(s.project.Sections) != 3 || s.project.Sections[0].Kind != "intro" {
+		t.Errorf("undone: %+v", s.project.Sections)
 	}
 }

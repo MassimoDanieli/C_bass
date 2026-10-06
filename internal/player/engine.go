@@ -45,6 +45,18 @@ type Engine struct {
 	bass, backing *audio.Buffer
 	length        int
 
+	// The recording can be played in another key. The two tracks are then made shorter or
+	// longer once (which moves their pitch) and played slower or faster by as much (which
+	// puts their speed back): pitch is how many frames of the recording one frame of the
+	// tracks in use stands for. Everything said to the engine and by it is in the time of
+	// the recording; inside, places are frames of the tracks in use.
+	original  [2]*audio.Buffer
+	duration  float64 // of the recording, in seconds
+	pitch     float64
+	semitones int
+	beatTimes []float64  // the beats as given, in seconds
+	loopTimes [2]float64 // and the stretch to repeat
+
 	playing           bool
 	speed             float64
 	gainBass, gainMix float32
@@ -81,7 +93,8 @@ type Engine struct {
 
 // NewEngine prepares two tracks of the same length for playing. Both must be 44.1 kHz stereo.
 func NewEngine(bass, backing *audio.Buffer) *Engine {
-	e := &Engine{bass: bass, backing: backing, length: min(bass.Len(), backing.Len()), speed: 1, gainBass: 1, gainMix: 1, jumped: true}
+	e := &Engine{bass: bass, backing: backing, length: min(bass.Len(), backing.Len()), speed: 1, gainBass: 1, gainMix: 1, jumped: true, pitch: 1}
+	e.original, e.duration = [2]*audio.Buffer{bass, backing}, float64(e.length)/Rate
 	for i := range e.window {
 		e.window[i] = float32(0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/frame))
 	}
@@ -93,7 +106,50 @@ func NewEngine(bass, backing *audio.Buffer) *Engine {
 }
 
 // Duration of the recording in seconds.
-func (e *Engine) Duration() float64 { return float64(e.length) / Rate }
+func (e *Engine) Duration() float64 { return e.duration }
+
+// SetPitch plays the recording so many semitones higher (or lower, below zero), at the speed
+// it had. Making the tracks for a new key takes about a second for a recording of minutes.
+func (e *Engine) SetPitch(semitones int) {
+	e.mu.Lock()
+	if semitones == e.semitones {
+		e.mu.Unlock()
+		return
+	}
+	bass, backing := e.original[0], e.original[1]
+	e.mu.Unlock()
+	if semitones != 0 {
+		factor := math.Pow(2, float64(semitones)/12)
+		bass, backing = audio.Repitch(bass, factor), audio.Repitch(backing, factor)
+	}
+	length := min(bass.Len(), backing.Len())
+	hits := findHits(bass, backing, length)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	seconds := e.position * e.pitch / Rate
+	e.bass, e.backing, e.length, e.hits, e.semitones = bass, backing, length, hits, semitones
+	e.pitch = e.duration * Rate / float64(length)
+	e.position, e.jumped = math.Min(float64(length), seconds*Rate/e.pitch), true
+	e.tail, e.tailLive = [2][hop]float32{}, false
+	e.loopA, e.loopB = e.loopTimes[0]*Rate/e.pitch, e.loopTimes[1]*Rate/e.pitch
+	e.placeBeats()
+}
+
+// Pitch is how many semitones above the recording it is being played.
+func (e *Engine) Pitch() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.semitones
+}
+
+// placeBeats puts the beats where they fall in the tracks in use.
+func (e *Engine) placeBeats() {
+	e.beats = make([]float64, len(e.beatTimes))
+	for i, beat := range e.beatTimes {
+		e.beats[i] = beat * Rate / e.pitch
+	}
+	e.nextBeat = sort.SearchFloat64s(e.beats, e.position)
+}
 
 // SetPlaying starts or stops. Starting at the very end starts again from the beginning (or
 // from the start of the stretch being repeated).
@@ -126,7 +182,7 @@ func (e *Engine) Playing() bool {
 func (e *Engine) Seek(seconds float64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.position = math.Max(0, math.Min(float64(e.length), seconds*Rate))
+	e.position = math.Max(0, math.Min(float64(e.length), seconds*Rate/e.pitch))
 	e.jumped = true
 }
 
@@ -155,7 +211,8 @@ func (e *Engine) SetGains(bass, rest float64) {
 func (e *Engine) SetLoop(a, b float64, on bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.loopA, e.loopB, e.loopOn = a*Rate, b*Rate, on && b-a > 0.2
+	e.loopTimes = [2]float64{a, b}
+	e.loopA, e.loopB, e.loopOn = a*Rate/e.pitch, b*Rate/e.pitch, on && b-a > 0.2
 }
 
 func (e *Engine) sample(channel, i int) float32 {
@@ -349,7 +406,7 @@ func (e *Engine) block() {
 			e.tail = [2][hop]float32{}
 			e.tailLive = false
 		}
-		e.note(mark{e.produced, e.position, 0})
+		e.note(mark{e.produced, e.position * e.pitch, 0})
 		if counting {
 			// the clicks of the bar counted in before the recording starts
 			for len(e.count) > 0 && e.count[0] < e.produced+hop {
@@ -377,7 +434,7 @@ func (e *Engine) block() {
 		}
 	}
 	e.tailLive = true
-	e.note(mark{e.produced, float64(start), e.speed})
+	e.note(mark{e.produced, float64(start) * e.pitch, e.speed})
 	// The beats that fall in what this block plays, each at its place in the block. A block
 	// plays its piece of the recording at the recording's own speed, whatever the speed asked:
 	// slowing down is pieces played again, and a beat already clicked is not clicked again.
@@ -387,9 +444,10 @@ func (e *Engine) block() {
 		}
 	}
 	e.natural = start + hop
-	e.position += hop * e.speed
+	step := hop * e.speed / e.pitch // in another key the tracks are run slower or faster to keep the speed
+	e.position += step
 	switch {
-	case e.loopOn && e.position >= e.loopB && e.position-hop*e.speed < e.loopB:
+	case e.loopOn && e.position >= e.loopB && e.position-step < e.loopB:
 		e.position, e.jumped = e.loopA, true
 		if e.quicken > 0 && e.speed < e.quickenTo { // every time round a little faster
 			e.speed = math.Min(e.quickenTo, e.speed+e.quicken)
@@ -451,12 +509,9 @@ func clickSound(hz, level float64) []float32 {
 func (e *Engine) SetBeats(beats []float64, strong []bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.beats = make([]float64, len(beats))
-	for i, beat := range beats {
-		e.beats[i] = beat * Rate
-	}
+	e.beatTimes = append([]float64(nil), beats...)
 	e.strong = append([]bool(nil), strong...)
-	e.nextBeat = sort.SearchFloat64s(e.beats, e.position)
+	e.placeBeats()
 }
 
 // SetMetronome turns the click on every beat on or off.
@@ -542,7 +597,7 @@ func (e *Engine) At(out int64) float64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if len(e.marks) == 0 {
-		return e.position / Rate
+		return e.position * e.pitch / Rate
 	}
 	m := e.marks[0]
 	for i := len(e.marks) - 1; i >= 0; i-- {
@@ -552,7 +607,7 @@ func (e *Engine) At(out int64) float64 {
 		}
 	}
 	at := m.at + float64(max(0, min(out-m.out, hop)))*m.rate
-	return math.Max(0, math.Min(float64(e.length), at)) / Rate
+	return math.Max(0, math.Min(e.duration*Rate, at)) / Rate
 }
 
 // Target is where the recording will be once everything already generated has been heard:
@@ -560,5 +615,5 @@ func (e *Engine) At(out int64) float64 {
 func (e *Engine) Target() float64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.position / Rate
+	return e.position * e.pitch / Rate
 }

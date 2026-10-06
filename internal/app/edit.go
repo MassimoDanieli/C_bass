@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/MassimoDanieli/c_bass/internal/project"
 	"math"
 	"sort"
 
@@ -16,11 +17,15 @@ import (
 
 // state is what a change can alter, kept so that the change can be undone.
 type state struct {
-	events   []transcribe.Event
-	chords   []chords.Chord
-	odd      []rhythm.OddBar
-	downbeat int
-	beats    []float64
+	events      []transcribe.Event
+	chords      []chords.Chord
+	odd         []rhythm.OddBar
+	downbeat    int
+	beats       []float64
+	sensitivity float64
+	transpose   int
+	key         string
+	sections    []project.Section
 }
 
 // remember keeps the part as it is now, to come back to.
@@ -34,6 +39,10 @@ func (s *song) remember() {
 		append([]rhythm.OddBar(nil), s.pulse.Odd...),
 		s.pulse.Downbeat,
 		s.pulse.Beats, // never changed in place: a new pulse is made instead
+		s.project.Sensitivity,
+		s.project.Transpose,
+		s.project.Key,
+		append([]project.Section(nil), s.project.Sections...),
 	})
 }
 
@@ -46,6 +55,15 @@ func (s *song) undo() bool {
 	s.history = s.history[:len(s.history)-1]
 	s.project.Events, s.project.Chords = last.events, last.chords
 	s.pulse.Odd, s.pulse.Downbeat, s.pulse.Beats = last.odd, last.downbeat, last.beats
+	s.project.Sensitivity = last.sensitivity
+	s.project.Sections = last.sections
+	if s.section >= len(s.project.Sections) {
+		s.section = -1
+	}
+	if s.project.Transpose != last.transpose {
+		s.project.Transpose, s.project.Key = last.transpose, last.key
+		s.player.SetPitch(last.transpose)
+	}
 	s.changed()
 	return true
 }
@@ -337,6 +355,161 @@ func (s *song) retempo(double bool) {
 	fresh := s.pulse.Rescale(double)
 	s.pulse.Beats, s.pulse.Downbeat, s.pulse.Odd = fresh.Beats, fresh.Downbeat, nil
 	s.loopOff()
+	s.changed()
+}
+
+// repeats says which of the reader's settings for notes struck again the part was read with.
+func (s *song) repeats() int {
+	for i, value := range project.Sensitivities {
+		if math.Abs(value-s.project.Sensitivity) < 0.005 {
+			return i
+		}
+	}
+	return 0
+}
+
+// reread reads the notes again from the bass, more or less ready to take a small rise in
+// level for a note struck again. Notes corrected by hand are read over with the rest; like
+// every other change, it can be taken back.
+func (s *song) reread(setting int) {
+	if s.bass == nil || s.backing == nil || setting < 0 || setting >= len(project.Sensitivities) {
+		return
+	}
+	s.remember()
+	s.project.Sensitivity = project.Sensitivities[setting]
+	if setting == 0 {
+		s.project.Sensitivity = 0
+	}
+	s.project.Events = project.ReadWith(s.bass, s.backing, s.project, s.project.Sensitivity)
+	for i := range s.project.Events {
+		s.made++
+		s.project.Events[i].ID = fmt.Sprintf("r-%d-%d", s.made, i)
+	}
+	s.chosen = ""
+	s.changed()
+}
+
+// --- sections ---
+
+// sectionAdd starts a section at the bar a moment falls in, and returns which one it is; -1
+// if one starts there already. It is given the name that most often comes next.
+func (s *song) sectionAdd(seconds float64) int {
+	start := s.barStart(max(0, s.bar(seconds)))
+	for _, section := range s.project.Sections {
+		if math.Abs(section.Start-start) < 0.05 {
+			return -1
+		}
+	}
+	kind := "verse"
+	if len(s.project.Sections) == 0 && start < 0.2*s.player.Duration() {
+		kind = "intro"
+	}
+	s.remember()
+	list := append(append([]project.Section(nil), s.project.Sections...), project.Section{Start: start, Kind: kind})
+	sort.SliceStable(list, func(a, b int) bool { return list[a].Start < list[b].Start })
+	s.project.Sections = list
+	s.changed()
+	for i, section := range list {
+		if section.Start == start {
+			return i
+		}
+	}
+	return -1
+}
+
+// sectionKind gives a section the next name on the list.
+func (s *song) sectionKind(i int) {
+	if i < 0 || i >= len(s.project.Sections) {
+		return
+	}
+	s.remember()
+	list := append([]project.Section(nil), s.project.Sections...)
+	next := 0
+	for k, kind := range project.SectionKinds {
+		if kind == list[i].Kind {
+			next = (k + 1) % len(project.SectionKinds)
+		}
+	}
+	list[i].Kind = project.SectionKinds[next]
+	s.project.Sections = list
+	s.changed()
+}
+
+func (s *song) sectionRemove(i int) {
+	if i < 0 || i >= len(s.project.Sections) {
+		return
+	}
+	s.remember()
+	list := append([]project.Section(nil), s.project.Sections[:i]...)
+	s.project.Sections = append(list, s.project.Sections[i+1:]...)
+	s.changed()
+}
+
+// sectionEnd is where a section stops: where the next one starts, or the recording ends.
+func (s *song) sectionEnd(i int) float64 {
+	if i+1 < len(s.project.Sections) {
+		return s.project.Sections[i+1].Start
+	}
+	return s.player.Duration()
+}
+
+// sectionRepeat repeats a section, from its first bar to its last.
+func (s *song) sectionRepeat(i int) {
+	if i < 0 || i >= len(s.project.Sections) {
+		return
+	}
+	first := s.bar(s.project.Sections[i].Start + 0.01)
+	last := s.bar(s.sectionEnd(i) - 0.05)
+	if i+1 < len(s.project.Sections) {
+		last = s.bar(s.sectionEnd(i)+0.01) - 1
+	}
+	s.loopA, s.loopB, s.loopOn = first, max(first, last), true
+	s.applyLoop()
+	s.player.Seek(s.barStart(first))
+}
+
+// sectionAt is the section a moment falls in, or -1 before the first.
+func (s *song) sectionAt(seconds float64) int {
+	at := -1
+	for i, section := range s.project.Sections {
+		if section.Start <= seconds+0.01 {
+			at = i
+		}
+	}
+	return at
+}
+
+// keyRange is how far from the recording's own key a piece can be moved, either way.
+const keyRange = 6
+
+// moveKey moves the whole piece a semitone up or down: the recording is played higher or
+// lower at the speed it had, and the part, with its chords, is written where it now sounds.
+func (s *song) moveKey(semitones int) {
+	to := s.project.Transpose + semitones
+	if semitones == 0 || to < -keyRange || to > keyRange {
+		return
+	}
+	s.remember()
+	s.project.MoveKey(semitones)
+	for i := range s.project.Events { // a name for any note that lost its own
+		if s.project.Events[i].ID == "" {
+			s.made++
+			s.project.Events[i].ID = fmt.Sprintf("k-%d-%d", s.made, i)
+		}
+	}
+	s.player.SetPitch(s.project.Transpose)
+	s.changed()
+}
+
+// offbeat moves every beat half a beat later, for a piece whose beat was followed on the
+// "ands". Twice is a whole beat.
+func (s *song) offbeat() {
+	if len(s.pulse.Beats) < 4 {
+		return
+	}
+	s.remember()
+	fresh := s.pulse.Halfway()
+	s.pulse.Beats = fresh.Beats
 	s.changed()
 }
 

@@ -199,8 +199,13 @@ func PDF(p *project.Project, names Names) []byte {
 			if bar.index >= 0 {
 				s.text(fmt.Sprint(bar.index+1), x+2, top-2.5, 6, false, 0.45, -1)
 			}
+			after := x + 12
 			if b > 0 && bar.beats != part.bars[b-1].beats { // the metre changes here: say so
-				s.text(fmt.Sprintf("%d/4", bar.beats), x+12, top-2.5, 6, true, 0.2, -1)
+				s.text(fmt.Sprintf("%d/4", bar.beats), after, top-2.5, 6, true, 0.2, -1)
+				after += 14
+			}
+			if bar.section != "" {
+				s.text(strings.ToUpper(bar.section), after, top-2.5, 6.5, true, 0, -1)
 			}
 			for _, c := range bar.chords {
 				s.text(c.chord.Name(names(60) == "Do"), at(c.slot)-3, top-10, 9.5, true, 0, -1)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/MassimoDanieli/c_bass/internal/audio"
 	"math"
 	"sort"
 
@@ -16,6 +17,8 @@ type song struct {
 	id      string
 	project *project.Project
 	player  *player.Player
+	bass    *audio.Buffer // the two tracks, kept to read the notes again
+	backing *audio.Buffer
 	tuning  fretboard.Tuning
 	pulse   *rhythm.Rhythm
 	score   *rhythm.Score
@@ -24,15 +27,16 @@ type song struct {
 	loopOn       bool
 	loopA, loopB int // bars, both included
 
-	chosen string // the note chosen for correcting, by its name; "" for none
-	chord  int    // the chord chosen, by its place; -1 for none
+	chosen  string // the note chosen for correcting, by its name; "" for none
+	chord   int    // the chord chosen, by its place; -1 for none
+	section int    // the section chosen; -1 for none
 
 	history []state // what the part was before each change made by hand
 	made    int     // notes added by hand so far, to name them
 }
 
 func newSong(id string, result *project.Result) *song {
-	s := &song{id: id, project: result.Project, player: player.New(result.Bass, result.Backing), chord: -1}
+	s := &song{id: id, project: result.Project, player: player.New(result.Bass, result.Backing), chord: -1, section: -1, bass: result.Bass, backing: result.Backing}
 	s.pulse = result.Project.Rhythm
 	if s.pulse == nil || len(s.pulse.Beats) < 2 || s.pulse.PerBar < 1 {
 		s.pulse = rhythm.Steady(120, result.Project.Duration, 4)
@@ -45,6 +49,7 @@ func newSong(id string, result *project.Result) *song {
 	}
 	s.write()
 	s.tellBeats()
+	s.player.SetPitch(result.Project.Transpose)
 	return s
 }
 

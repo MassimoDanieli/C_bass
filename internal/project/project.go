@@ -29,8 +29,17 @@ type Project struct {
 	Chords []chords.Chord `json:"chords"`
 	// Low keeps the fingering near the nut, where the line allows it.
 	Low bool `json:"lowPosition,omitempty"`
+	// Sensitivity is how readily the reader took a rise in level for a note struck again,
+	// when it is not the usual: see Sensitivities.
+	Sensitivity float64 `json:"sensitivity,omitempty"`
 	// Key of the piece as a pitch name, when it is known: the pieces that come with the program have one.
 	Key string `json:"key,omitempty"`
+	// Transpose is how many semitones above the recording the part is written, and the
+	// recording played: the piece moved to another key.
+	Transpose int `json:"transpose,omitempty"`
+	// Sections are the parts of the piece, named by whoever plays it: where the verse
+	// starts, where the chorus. Each lasts until the next.
+	Sections []Section `json:"sections,omitempty"`
 	// BuiltIn marks a piece that came with the program.
 	BuiltIn bool `json:"builtIn,omitempty"`
 }
@@ -43,6 +52,17 @@ type Project struct {
 //	   sound changes; pitch is followed between semitones; what is left of a recording with
 //	   no bass is not read as notes.
 const Reader = 2
+
+// Section is a part of a piece: where it starts, in seconds, and what it is.
+type Section struct {
+	Start float64 `json:"start"`
+	Kind  string  `json:"kind"` // one of SectionKinds
+	// Name is the kind as written out for whoever reads the part, when that has been done.
+	Name string `json:"name,omitempty"`
+}
+
+// SectionKinds are the names a section can have, in the order they are offered.
+var SectionKinds = []string{"intro", "verse", "prechorus", "chorus", "bridge", "solo", "outro"}
 
 // Options for Analyse. The zero value separates the bass and writes for a four-string bass.
 type Options struct {
@@ -181,6 +201,15 @@ func read(bass, mix *audio.Buffer, separated bool, tuning fretboard.Tuning, fret
 	return events
 }
 
+// Sensitivities are the three settings of the reader for notes struck again on the same
+// pitch. A note repeated without letting go hardly dips in level, less still once the bass
+// has been through the separation: the usual setting then writes one long note where several
+// were played. The others take a smaller rise for a new note. Measured on a song of straight
+// eighths, the middle one found 47 of 126 merged notes again and the last 64, with nothing
+// made up on the recordings there is a score for; on a real bass with no score they add
+// notes that cannot be told from splits without listening. Hence a choice, not a default.
+var Sensitivities = []float64{0.72, 0.80, 0.86}
+
 // Reread reads the notes of a separated recording again, with the reader of this version of
 // the program, keeping its bars and its instrument. It reports whether anything was done.
 func Reread(result *Result) bool {
@@ -194,6 +223,15 @@ func Reread(result *Result) bool {
 			return true
 		}
 	}
+	p.Events = ReadWith(result.Bass, result.Backing, p, p.Sensitivity)
+	p.Reader = Reader
+	return true
+}
+
+// ReadWith reads the notes of a separated bass for a project's instrument, with a
+// sensitivity to notes struck again (0 for the usual).
+func ReadWith(bass, backing *audio.Buffer, p *Project, sensitivity float64) []transcribe.Event {
+	result := &Result{Bass: bass, Backing: backing}
 	mix := &audio.Buffer{SampleRate: result.Bass.SampleRate, Channels: make([][]float32, len(result.Bass.Channels))}
 	for c := range mix.Channels {
 		mix.Channels[c] = make([]float32, min(result.Bass.Len(), result.Backing.Len()))
@@ -205,9 +243,58 @@ func Reread(result *Result) bool {
 	if frets <= 0 {
 		frets = 12
 	}
-	p.Events = read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, 0, nil)
-	p.Reader = Reader
-	return true
+	events := read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, sensitivity, nil)
+	if p.Transpose != 0 { // the recording is in its own key: the part is written in the one chosen
+		events = shift(events, p.Transpose, fretboard.TuningFor(p.Tuning), frets, p.Low)
+	}
+	return events
+}
+
+// shift moves notes by semitones and finds them a place on the neck again. A note that would
+// fall off the instrument is written an octave away, where it can be played.
+func shift(events []transcribe.Event, semitones int, tuning fretboard.Tuning, frets int, low bool) []transcribe.Event {
+	lowest, highest := tuning.Open[0], tuning.Open[len(tuning.Open)-1]+frets
+	moved := make([]transcribe.Event, len(events))
+	for i, event := range events {
+		event.Midi += semitones
+		for event.Midi < lowest {
+			event.Midi += 12
+		}
+		for event.Midi > highest {
+			event.Midi -= 12
+		}
+		event.Locked = false // the string it was on is no longer where it is played
+		moved[i] = event
+	}
+	if out := fretboard.FingerWith(moved, tuning, frets, low); out != nil {
+		return out
+	}
+	return moved
+}
+
+// MoveKey writes the part so many semitones higher (or lower): notes, chords and the name of
+// the key. The recording has to be played as much higher by whoever plays it.
+func (p *Project) MoveKey(semitones int) {
+	if semitones == 0 {
+		return
+	}
+	frets := p.Frets
+	if frets <= 0 {
+		frets = 12
+	}
+	p.Events = shift(p.Events, semitones, fretboard.TuningFor(p.Tuning), frets, p.Low)
+	chords := append(p.Chords[:0:0], p.Chords...)
+	for i := range chords {
+		chords[i].Root = ((chords[i].Root+semitones)%12 + 12) % 12
+	}
+	p.Chords = chords
+	for midi := 0; midi < 12 && p.Key != ""; midi++ {
+		if fretboard.PitchName(midi) == p.Key {
+			p.Key = fretboard.PitchName(midi + semitones + 120)
+			break
+		}
+	}
+	p.Transpose += semitones
 }
 
 // Harmonise reads the chords of a recording that has none written down yet, from what is left

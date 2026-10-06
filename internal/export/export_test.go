@@ -2,8 +2,11 @@ package export
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/xml"
+	"github.com/MassimoDanieli/c_bass/internal/demo"
 	"io"
+	"math"
 	"strconv"
 	"testing"
 
@@ -131,4 +134,68 @@ func TestPDF(t *testing.T) {
 		}
 	}
 	_ = io.Discard
+}
+
+// The MIDI file is well formed, has every note, and puts each where the recording has it:
+// read back with its own tempo map, a note starts within a thousandth of a second of its time.
+func TestMIDIKeepsTheTimeOfTheRecording(t *testing.T) {
+	p := demo.Pieces[1].Render().Project
+	p.Rhythm.SetBeatsIn(3, 2) // and a bar of its own length on the way
+	data := MIDI(p)
+	if string(data[:4]) != "MThd" || string(data[14:18]) != "MTrk" {
+		t.Fatal("not a MIDI file")
+	}
+	if length := int(binary.BigEndian.Uint32(data[18:22])); length != len(data)-22 {
+		t.Fatalf("the track says %d bytes and has %d", length, len(data)-22)
+	}
+	track := data[22:]
+	number := func() int {
+		n := 0
+		for {
+			b := track[0]
+			track = track[1:]
+			n = n<<7 | int(b&0x7f)
+			if b&0x80 == 0 {
+				return n
+			}
+		}
+	}
+	var seconds, perTick float64
+	var starts []float64
+	var pitches []int
+	ended := false
+	for len(track) > 0 && !ended {
+		seconds += float64(number()) * perTick
+		switch status := track[0]; {
+		case status == 0xff:
+			kind := track[1]
+			track = track[2:]
+			body := track[:number()]
+			track = track[len(body):]
+			switch kind {
+			case 0x51:
+				perTick = float64(int(body[0])<<16|int(body[1])<<8|int(body[2])) / 1e6 / 480
+			case 0x2f:
+				ended = true
+			}
+		case status&0xf0 == 0xc0:
+			track = track[2:]
+		default:
+			if status&0xf0 == 0x90 {
+				starts, pitches = append(starts, seconds), append(pitches, int(track[1]))
+			}
+			track = track[3:]
+		}
+	}
+	if !ended || len(track) != 0 {
+		t.Fatal("the track does not end where it says")
+	}
+	if len(starts) != len(p.Events) {
+		t.Fatalf("%d notes in the file, %d in the part", len(starts), len(p.Events))
+	}
+	for i, event := range p.Events {
+		if pitches[i] != event.Midi || math.Abs(starts[i]-event.Start) > 0.001 {
+			t.Fatalf("note %d: %d at %.4f in the file, %d at %.4f in the part", i, pitches[i], starts[i], event.Midi, event.Start)
+		}
+	}
 }

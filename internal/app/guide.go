@@ -64,6 +64,7 @@ func (g *Game) helpParts() []part {
 			{t("Conta una battuta", "Count a bar in"), t("una battuta di clic prima che il brano parta", "a bar of clicks before the recording starts")},
 			{t("Metronomo", "Metronome"), t("batte i quarti sul tempo vero della registrazione, più forte sull'uno", "clicks the beats on the recording's own tempo, louder on the one")},
 			{t("Più veloce a ogni giro", "Faster every time round"), t("a ogni ripetizione del tratto scelto la velocità sale del 5%, fino al 100%", "at each pass of the repeated stretch the speed goes up by 5%, to 100%")},
+			{t("Tonalità − +", "Key − +"), t("sposta tutto il brano di un semitono, fino a sei: la registrazione suona più alta o più bassa alla velocità di prima, e note e accordi sono scritti dove ora suonano", "moves the whole piece by a semitone, up to six: the recording plays higher or lower at the speed it had, and notes and chords are written where they now sound")},
 			{t("Basso, Il resto", "Bass, The rest"), t("due volumi: basso a zero per suonarci sopra, il resto a zero per sentire solo il basso", "two volumes: bass at zero to play over the rest, the rest at zero to hear the bass alone")},
 		}},
 		{t("Correggere", "Correcting"), [][2]string{
@@ -75,17 +76,24 @@ func (g *Game) helpParts() []part {
 			{t("Maiusc ← →", "Shift ← →"), t("la sposta di un sedicesimo", "moves it by a sixteenth")},
 			{"−  =", t("la accorcia, la allunga", "shorter, longer")},
 			{t("Canc", "Delete"), t("la toglie", "removes it")},
+			{t("Ribattute", "Repeated notes"), t("rilegge le note dal basso, più o meno pronto a prendere per nuova una nota ribattuta: «di più» e «molte» quando di più note uguali ne è stata scritta una lunga", "reads the notes again from the bass, more or less ready to take a repeated note for a new one: \"more\" and \"most\" when several notes alike were written as one long one")},
 			{t("Cmd/Ctrl Z", "Cmd/Ctrl Z"), t("annulla l'ultima modifica (fino a cento)", "undoes the last change (up to a hundred)")},
 		}},
 		{t("Battute e tempo", "Bars and tempo"), [][2]string{
 			{t("stanghette ‹ ›", "bar lines ‹ ›"), t("spostano le battute di un quarto, quando l'«uno» è nel punto sbagliato", "move the bars by a beat, when the \"one\" is in the wrong place")},
 			{t("battuta − +", "bar − +"), t("danno alla battuta in cui ti trovi una lunghezza sua: una battuta in 2/4 dentro un brano in 4/4", "give the bar you are in a length of its own: a 2/4 bar in a 4/4 piece")},
+			{"+½", t("sposta il battito di mezzo quarto, quando è stato seguito sui levare: lo senti dal metronomo che batte in mezzo", "moves the beat half a beat later, when it was followed on the off-beats: you hear it from the metronome clicking in between")},
 			{"÷2  ×2", t("contano il brano alla metà o al doppio del tempo: 87 o 174 è spesso questione di opinione", "count the piece at half or twice the tempo: 87 or 174 is often a matter of opinion")},
+		}},
+		{t("Sezioni", "Sections"), [][2]string{
+			{t("+ Sezione", "+ Section"), t("fa cominciare una sezione dalla battuta in cui ti trovi: strofa, ritornello, ponte… Dura fino alla prossima", "starts a section at the bar you are in: verse, chorus, bridge… It lasts until the next one")},
+			{"", t("Un clic sul nome di una sezione permette di cambiarlo, di ripetere la sezione intera o di toglierla. I nomi finiscono anche nel PDF, nel MusicXML e nel MIDI.", "Click the name of a section to change it, to repeat the whole section or to remove it. The names go into the PDF, the MusicXML and the MIDI as well.")},
+			{"[  ]", t("all'inizio della sezione, e alla prossima", "to the start of the section, and to the next")},
 		}},
 		{t("Strumento ed esportazione", "Instrument and export"), [][2]string{
 			{t("4, 5, 6 corde", "4, 5, 6 strings"), t("la diteggiatura si ricalcola per lo strumento scelto", "the fingering is worked out again for the instrument chosen")},
 			{t("primi tasti", "first frets"), t("tiene la mano vicino al capotasto dove la linea lo permette; «tutto il manico» la manda dove si sposta di meno", "keeps the hand near the nut where the line allows; \"whole neck\" sends it where it moves least")},
-			{t("Esporta", "Export"), t("scrive la parte nella cartella dei download: PDF da stampare, MusicXML per Guitar Pro e MuseScore, tablatura in testo", "writes the part to the Downloads folder: a PDF to print, MusicXML for Guitar Pro and MuseScore, text tablature")},
+			{t("Esporta", "Export"), t("scrive la parte nella cartella dei download: PDF da stampare, MusicXML per Guitar Pro e MuseScore, MIDI a tempo con la registrazione, tablatura in testo", "writes the part to the Downloads folder: a PDF to print, MusicXML for Guitar Pro and MuseScore, MIDI in time with the recording, text tablature")},
 		}},
 		{t("Quando non torna", "When it is not right"), [][2]string{
 			{"", t("Il programma legge meglio un basso suonato chiaro in un brano registrato bene. Sbaglia più facilmente con bassi sintetici molto gravi, note ribattute legate, e brani in cui il basso si sente appena: lì la separazione può non trovarlo. Gli accordi sono una proposta: vanno controllati a orecchio. Tutto si può correggere a mano.",

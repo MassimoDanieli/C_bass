@@ -29,6 +29,7 @@ type bar struct {
 	beats   int
 	symbols []rhythm.Symbol
 	chords  []placed
+	section string // the name of the section that starts with this bar, if one does
 }
 
 // placed is a chord with the sixteenth of its bar it starts on.
@@ -60,8 +61,18 @@ func layout(p *project.Project) *part {
 		harmony[index] = append(harmony[index], placed{at - pulse.BarStart(index)*rhythm.Division, chord})
 		first, last = min(first, index), max(last, index)
 	}
+	starting := map[int]string{}
+	for _, section := range p.Sections {
+		name := section.Name
+		if name == "" {
+			name = section.Kind
+		}
+		index := pulse.BarAt(pulse.Position(section.Start+0.01) - out.score.Shift + 1e-6)
+		starting[index] = name
+		first, last = min(first, index), max(last, index)
+	}
 	for index := first; index <= last; index++ {
-		b := bar{index: index, beats: pulse.BeatsIn(index), symbols: byBar[index], chords: harmony[index]}
+		b := bar{index: index, beats: pulse.BeatsIn(index), symbols: byBar[index], chords: harmony[index], section: starting[index]}
 		if len(b.symbols) == 0 { // a bar with nothing in it is a bar of rest
 			for _, piece := range rhythm.SplitValues(0, b.beats*rhythm.Division, b.beats*rhythm.Division, true) {
 				b.symbols = append(b.symbols, rhythm.Symbol{Bar: index, Slot: piece.Slot, Value: piece.Value, Rest: true, Index: -1, At: pulse.BarStart(index)*rhythm.Division + piece.Slot})
@@ -153,6 +164,11 @@ func MusicXML(p *project.Project) []byte {
 		if b == 0 {
 			tempo := math.Round(part.pulse.Tempo())
 			w(`      <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>%.0f</per-minute></metronome></direction-type><sound tempo="%.0f"/></direction>`, tempo, tempo)
+		}
+		if bar.section != "" {
+			var name bytes.Buffer
+			xml.EscapeText(&name, []byte(bar.section))
+			w(`      <direction placement="above"><direction-type><rehearsal>%s</rehearsal></direction-type></direction>`, name.String())
 		}
 		for _, c := range bar.chords {
 			root := steps[((c.chord.Root%12)+12)%12]
