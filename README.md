@@ -28,7 +28,7 @@ Scrive accanto al brano:
 
 La prima volta scarica due cose, che restano nella cache dell'utente: la libreria ONNX Runtime (circa 30 MB, dal rilascio ufficiale su GitHub) e il modello Demucs (174 MB, dal sito di Manico). Entrambe sono verificate con il loro hash.
 
-Opzioni principali: `-tuning 4|5|5c|6`, `-frets 12`, `-sensitivity 0.72` (più alta se mancano note ribattute, più bassa se una nota tenuta viene spezzata), `-beats 4`, `-mix` (senza separazione: più veloce, molto meno preciso), `-coreml` (macOS). `cbass help` le elenca tutte.
+Opzioni principali: `-tuning 4|5|5c|6`, `-frets 12`, `-sensitivity 0.72` (più alta se mancano note ribattute, più bassa se una nota tenuta viene spezzata), `-beats 4`, `-mix` (senza separazione: più veloce, molto meno preciso). `cbass help` le elenca tutte.
 
 Legge MP3 e WAV. Il programma non invia nulla in rete: scarica soltanto libreria e modello.
 

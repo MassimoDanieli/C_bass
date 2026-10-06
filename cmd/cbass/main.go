@@ -92,7 +92,7 @@ func analyseFlags() (*flag.FlagSet, *settings) {
 	flags.IntVar(&s.bar, "beats", 4, "beats in a bar")
 	flags.Float64Var(&s.sensitivity, "sensitivity", 0.72, "how readily a new attack starts a note, 0.55 to 0.90")
 	flags.IntVar(&s.threads, "threads", 0, "processor threads for the separation (default: all)")
-	flags.BoolVar(&s.coreML, "coreml", false, "macOS: let CoreML run the model where it can")
+	flags.BoolVar(&s.coreML, "coreml", false, "macOS, experimental: let CoreML run the model (on the build machines it never finished)")
 	return flags, s
 }
 
