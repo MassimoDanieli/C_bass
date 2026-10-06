@@ -9,10 +9,12 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/hajimehoshi/go-mp3"
+	"github.com/mewkiz/flac"
 )
 
 // Buffer is a recording in memory: one slice of samples per channel, all the same length.
@@ -71,10 +73,114 @@ func DecodeBytes(data []byte, path string) (*Buffer, error) {
 	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
 		return ReadWAV(data)
 	}
+	if len(data) >= 4 && string(data[0:4]) == "fLaC" {
+		return readFLAC(data)
+	}
+	// The other kinds come before MP3, which has no mark of its own and is guessed at.
+	if kind := otherKind(data, path); kind != "" {
+		return readWithHelp(data, kind, path)
+	}
 	if looksLikeMP3(data) || strings.EqualFold(filepath.Ext(path), ".mp3") {
 		return readMP3(data)
 	}
-	return nil, fmt.Errorf("%s: only WAV and MP3 files can be read for now", filepath.Base(path))
+	return nil, fmt.Errorf("%s: only WAV, MP3, FLAC and M4A files can be read", filepath.Base(path))
+}
+
+// Kinds are the endings of the files Decode may be able to read.
+var Kinds = []string{".mp3", ".wav", ".wave", ".flac", ".m4a", ".aac", ".mp4", ".ogg", ".opus", ".aif", ".aiff"}
+
+// Readable says whether a file has one of those endings.
+func Readable(name string) bool {
+	ending := strings.ToLower(filepath.Ext(name))
+	for _, kind := range Kinds {
+		if ending == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func readFLAC(data []byte) (*Buffer, error) {
+	stream, err := flac.New(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("flac: %w", err)
+	}
+	channels := int(stream.Info.NChannels)
+	scale := float32(1) / float32(int64(1)<<(stream.Info.BitsPerSample-1))
+	out := &Buffer{SampleRate: int(stream.Info.SampleRate), Channels: make([][]float32, channels)}
+	for {
+		frame, err := stream.ParseNext()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("flac: %w", err)
+		}
+		for c, subframe := range frame.Subframes {
+			for _, sample := range subframe.Samples {
+				out.Channels[c] = append(out.Channels[c], float32(sample)*scale)
+			}
+		}
+	}
+	if out.Len() == 0 {
+		return nil, errors.New("flac: no audio in the file")
+	}
+	return out, nil
+}
+
+// otherKind recognises the kinds of file this program has no reader of its own for: AAC in
+// its MP4 wrapping (.m4a), Ogg, AIFF. It goes by the content first, then by the name.
+func otherKind(data []byte, path string) string {
+	switch {
+	case len(data) >= 12 && string(data[4:8]) == "ftyp":
+		return ".m4a"
+	case len(data) >= 4 && string(data[0:4]) == "OggS":
+		return ".ogg"
+	case len(data) >= 12 && string(data[0:4]) == "FORM" && (string(data[8:12]) == "AIFF" || string(data[8:12]) == "AIFC"):
+		return ".aiff"
+	}
+	switch ending := strings.ToLower(filepath.Ext(path)); ending {
+	case ".m4a", ".aac", ".mp4", ".ogg", ".opus", ".aif", ".aiff":
+		return ending
+	}
+	return ""
+}
+
+// readWithHelp has the system turn a file into WAV: afconvert, which every Mac has, or ffmpeg
+// where it is installed.
+func readWithHelp(data []byte, kind, path string) (*Buffer, error) {
+	dir, err := os.MkdirTemp("", "cbass")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	in, out := filepath.Join(dir, "in"+kind), filepath.Join(dir, "out.wav")
+	if err := os.WriteFile(in, data, 0o600); err != nil {
+		return nil, err
+	}
+	var tried []string
+	for _, command := range [][]string{
+		{"afconvert", "-f", "WAVE", "-d", "LEI16", in, out},
+		{"ffmpeg", "-v", "error", "-y", "-i", in, "-vn", "-acodec", "pcm_s16le", out},
+	} {
+		if _, err := exec.LookPath(command[0]); err != nil {
+			continue
+		}
+		tried = append(tried, command[0])
+		if err := hidden(exec.Command(command[0], command[1:]...)).Run(); err != nil {
+			continue
+		}
+		if converted, err := os.ReadFile(out); err == nil {
+			if buffer, err := ReadWAV(converted); err == nil {
+				return buffer, nil
+			}
+		}
+	}
+	name := filepath.Base(path)
+	if len(tried) == 0 {
+		return nil, fmt.Errorf("%s: %s files need ffmpeg, which is not installed: convert the file to MP3, WAV or FLAC", name, kind)
+	}
+	return nil, fmt.Errorf("%s: %s could not read this file", name, strings.Join(tried, " and "))
 }
 
 func looksLikeMP3(data []byte) bool {

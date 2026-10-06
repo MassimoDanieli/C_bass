@@ -65,10 +65,10 @@ func (s *song) moment(beats float64) float64 {
 
 // bar is the bar a moment falls in, counted from 0.
 func (s *song) bar(seconds float64) int {
-	return int(math.Floor((s.page(seconds) + 1e-6) / float64(s.perBar)))
+	return s.pulse.BarAt(s.page(seconds) + 1e-6)
 }
 
-func (s *song) barStart(bar int) float64 { return s.moment(float64(bar * s.perBar)) }
+func (s *song) barStart(bar int) float64 { return s.moment(float64(s.pulse.BarStart(bar))) }
 
 // lastBar is the bar in which the recording ends.
 func (s *song) lastBar() int { return s.bar(s.player.Duration()) }

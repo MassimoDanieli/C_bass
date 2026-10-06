@@ -151,6 +151,7 @@ func (g *Game) workingScreen(c *canvas) {
 		{stageSeparating, g.t("Separo il basso dal resto", "Separating the bass from the rest"), true},
 		{stageNotes, g.t("Leggo le note", "Reading the notes"), true},
 		{stageBeat, g.t("Trovo il tempo e le battute", "Finding the tempo and the bars"), true},
+		{stageChords, g.t("Leggo gli accordi", "Reading the chords"), true},
 		{stageSaving, g.t("Metto via il risultato", "Putting the result away"), true},
 	}
 	row := y + 50

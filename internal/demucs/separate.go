@@ -1,6 +1,7 @@
 package demucs
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -35,8 +36,14 @@ type Options struct {
 	CoreML bool
 }
 
+// ErrStopped is what Separate returns when it was asked to stop.
+var ErrStopped = errors.New("stopped")
+
 // Separator holds a loaded model.
 type Separator struct {
+	// Stop, if set, is asked before every pass whether to give up: a separation takes a
+	// minute or more, and whoever started it may think better of it.
+	Stop func() bool
 	session *ort.DynamicAdvancedSession
 	inputs  []string
 	outputs []string
@@ -153,6 +160,9 @@ func (s *Separator) Separate(mix *audio.Buffer, progress func(done, total int)) 
 		progress(0, total)
 	}
 	for pass, offset := 0, 0; offset < length; pass, offset = pass+1, offset+stride {
+		if s.Stop != nil && s.Stop() {
+			return nil, ErrStopped
+		}
 		chunk := min(segment, length-offset)
 		// The stretch is centred in the network's window, with real audio around it where there is some.
 		start := offset - (segment-chunk)/2

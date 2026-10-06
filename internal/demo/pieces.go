@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
+	"github.com/MassimoDanieli/c_bass/internal/chords"
 	"github.com/MassimoDanieli/c_bass/internal/fretboard"
 	"github.com/MassimoDanieli/c_bass/internal/library"
 	"github.com/MassimoDanieli/c_bass/internal/project"
@@ -110,6 +111,17 @@ func (p Piece) Render() *project.Result {
 		rest.add(start, Pad(voicing, half*1.1, 0.07), -0.4)
 		rest.add(start+half, Pad(voicing, half*1.1, 0.055), -0.4)
 	}
+	// the chords, as written
+	var harmony []chords.Chord
+	for i, c := range p.Bars {
+		start := float64(i+1) * float64(p.Beats) * beat
+		next := chords.Chord{Start: start, End: start + float64(p.Beats)*beat, Root: c.root % 12, Quality: quality(c.above)}
+		if n := len(harmony); n > 0 && harmony[n-1].Root == next.Root && harmony[n-1].Quality == next.Quality {
+			harmony[n-1].End = next.End
+			continue
+		}
+		harmony = append(harmony, next)
+	}
 	sort.Slice(events, func(a, b int) bool { return events[a].Start < events[b].Start })
 	events = transcribe.Normalize(events, total)
 	tuning := fretboard.TuningFor("4")
@@ -118,7 +130,7 @@ func (p Piece) Render() *project.Result {
 		Project: &project.Project{
 			Reader: project.Reader, Version: "demo", Title: p.Title, Key: p.Key, BuiltIn: true,
 			Duration: total, Source: "bass", Tuning: tuning.Key, Frets: 12,
-			Rhythm: rhythm.Steady(p.BPM, total, p.Beats), Events: events,
+			Rhythm: rhythm.Steady(p.BPM, total, p.Beats), Events: events, Chords: harmony,
 		},
 		Bass: bass.buffer(), Backing: rest.buffer(),
 	}
@@ -295,6 +307,25 @@ var Pieces = []Piece{
 			return out
 		},
 	},
+}
+
+// quality names a pad voicing the way a chord chart would.
+func quality(above []int) string {
+	third, seventh := "", ""
+	for _, interval := range above {
+		switch interval % 12 {
+		case 3:
+			third = "m"
+		case 10:
+			seventh = "7"
+		case 11:
+			seventh = "maj7"
+		}
+	}
+	if seventh == "maj7" && third == "m" {
+		return "m" // not one of the kinds told apart: the triad is the nearest
+	}
+	return third + seventh
 }
 
 func twice(bars []chord) []chord { return append(append([]chord(nil), bars...), bars...) }

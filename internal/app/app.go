@@ -396,6 +396,8 @@ func (g *Game) open(name string, data []byte) {
 				j.at(stageNotes, "", step.Done, step.Total)
 			case project.NotesRead:
 				j.at(stageBeat, "", 0, 0)
+			case project.BeatFound:
+				j.at(stageChords, "", 0, 0)
 			}
 		})
 		if err != nil {
@@ -428,12 +430,18 @@ func (g *Game) load(j *job, id string) (*song, error) {
 		return nil, err
 	}
 	// read by an earlier version of the program: read again, from the bass already separated
+	changed := false
 	if result.Project.Reader < project.Reader {
 		j.at(stageNotes, "", 0, 0)
-		if project.Reread(result) {
-			if err := g.lib.SaveProject(id, result.Project); err != nil {
-				return nil, err
-			}
+		changed = project.Reread(result)
+	}
+	if result.Project.Chords == nil {
+		j.at(stageChords, "", 0, 0)
+		changed = project.Harmonise(result) || changed
+	}
+	if changed {
+		if err := g.lib.SaveProject(id, result.Project); err != nil {
+			return nil, err
 		}
 	}
 	return newSong(id, result), nil
@@ -488,6 +496,7 @@ const (
 	stageSeparating
 	stageNotes
 	stageBeat
+	stageChords
 	stageSaving
 	stageLoading
 )

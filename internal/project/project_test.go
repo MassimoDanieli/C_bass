@@ -31,7 +31,7 @@ func line(level float64) *audio.Buffer {
 	})
 }
 
-func chords(level float64) *audio.Buffer {
+func keys(level float64) *audio.Buffer {
 	return track(3, func(t float64) float64 {
 		return level * (math.Sin(2*math.Pi*196*t) + math.Sin(2*math.Pi*247*t) + math.Sin(2*math.Pi*294*t)) / 3
 	})
@@ -41,7 +41,7 @@ func chords(level float64) *audio.Buffer {
 func TestRereadReplacesWhatAnOlderReaderWrote(t *testing.T) {
 	result := &Result{
 		Project: &Project{Tuning: "4", Frets: 12, Events: []transcribe.Event{{Midi: 60}, {Midi: 61}, {Midi: 62}, {Midi: 63}, {Midi: 64}, {Midi: 65}}},
-		Bass:    line(0.4), Backing: chords(0.2),
+		Bass:    line(0.4), Backing: keys(0.2),
 	}
 	if !Reread(result) {
 		t.Fatal("an old project was left as it was")
@@ -66,7 +66,7 @@ func TestRereadReplacesWhatAnOlderReaderWrote(t *testing.T) {
 func TestNoBassIsNoNotes(t *testing.T) {
 	result := &Result{
 		Project: &Project{Tuning: "4", Frets: 12, Events: []transcribe.Event{{Midi: 40}}},
-		Bass:    line(0.0004), Backing: chords(0.3),
+		Bass:    line(0.0004), Backing: keys(0.3),
 	}
 	Reread(result)
 	if result.Project.Events == nil || len(result.Project.Events) != 0 {

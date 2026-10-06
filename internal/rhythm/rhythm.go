@@ -24,6 +24,71 @@ type Rhythm struct {
 	PerBar int `json:"perBar"`
 	// Downbeat is which of the first beats starts a bar.
 	Downbeat int `json:"downbeat"`
+	// Odd lists the bars that do not have PerBar beats, in order: a bar of two in a piece in
+	// four moves every bar line after it.
+	Odd []OddBar `json:"odd,omitempty"`
+}
+
+// OddBar is a bar with its own number of beats. Bars are counted from 0.
+type OddBar struct {
+	Bar   int `json:"bar"`
+	Beats int `json:"beats"`
+}
+
+// BeatsIn is the number of beats in a bar.
+func (r *Rhythm) BeatsIn(bar int) int {
+	for _, odd := range r.Odd {
+		if odd.Bar == bar {
+			return odd.Beats
+		}
+	}
+	return r.PerBar
+}
+
+// BarStart is where a bar starts, in beats from the first bar line. Bars before the first
+// bar line, where a pickup falls, have negative numbers and the usual length.
+func (r *Rhythm) BarStart(bar int) int {
+	start := bar * r.PerBar
+	for _, odd := range r.Odd {
+		if odd.Bar < bar {
+			start += odd.Beats - r.PerBar
+		}
+	}
+	return start
+}
+
+// BarAt is the bar a place falls in, the place being in beats from the first bar line.
+func (r *Rhythm) BarAt(beats float64) int {
+	if beats < 0 {
+		return int(math.Floor(beats / float64(r.PerBar)))
+	}
+	// from the bar it would be with no odd bars, a step or two either way finds the real one
+	bar := int(beats) / r.PerBar
+	for r.BarStart(bar) > int(math.Floor(beats)) {
+		bar--
+	}
+	for r.BarStart(bar+1) <= int(math.Floor(beats)) {
+		bar++
+	}
+	return bar
+}
+
+// SetBeatsIn gives a bar its own number of beats, or the usual number back.
+func (r *Rhythm) SetBeatsIn(bar, beats int) {
+	if bar < 0 || beats < 1 {
+		return
+	}
+	kept := r.Odd[:0:0]
+	for _, odd := range r.Odd {
+		if odd.Bar != bar {
+			kept = append(kept, odd)
+		}
+	}
+	if beats != r.PerBar {
+		kept = append(kept, OddBar{bar, beats})
+		sort.Slice(kept, func(a, b int) bool { return kept[a].Bar < kept[b].Bar })
+	}
+	r.Odd = kept
 }
 
 // fft transforms real and imag in place; their length must be a power of two.
@@ -433,11 +498,8 @@ type Symbol struct {
 	Index int
 	// Tied marks a note that only continues the one before it.
 	Tied bool
-}
-
-// Position of the symbol in beats from the first bar line.
-func (s Symbol) Position(barSlots int) float64 {
-	return float64(s.Bar*barSlots+s.Slot) / Division
+	// At is its place in sixteenths from the first bar line, whatever the bars before it hold.
+	At int
 }
 
 // Score is the written music.
@@ -449,27 +511,23 @@ type Score struct {
 	Shift float64
 }
 
-func floorDiv(a, b int) int {
-	q := a / b
-	if a%b != 0 && (a < 0) != (b < 0) {
-		q--
-	}
-	return q
-}
-
 // Notate writes the notes out: for every bar, its symbols in order.
 func (r *Rhythm) Notate(notes []Note) *Score {
-	barSlots := r.PerBar * Division
-	score := &Score{BarSlots: barSlots, Placed: r.Quantize(notes), Shift: r.Calibrate(notes)}
+	score := &Score{BarSlots: r.PerBar * Division, Placed: r.Quantize(notes), Shift: r.Calibrate(notes)}
+	// where the bar holding a sixteenth starts, and how long that bar is, in sixteenths
+	barOf := func(at int) (bar, start, length int) {
+		bar = r.BarAt(float64(at) / Division)
+		return bar, r.BarStart(bar) * Division, r.BeatsIn(bar) * Division
+	}
 	push := func(slot, length int, rest bool, index int) {
 		first := true
 		for at := slot; at < slot+length; {
-			bar := floorDiv(at, barSlots)
-			inBar := at - bar*barSlots
+			bar, start, barSlots := barOf(at)
+			inBar := at - start
 			span := min(slot+length-at, barSlots-inBar)
 			for _, piece := range SplitValues(inBar, span, barSlots, rest) {
 				score.Symbols = append(score.Symbols, Symbol{
-					Bar: bar, Slot: piece.Slot, Value: piece.Value, Rest: rest, Index: index, Tied: !first && !rest,
+					Bar: bar, Slot: piece.Slot, Value: piece.Value, Rest: rest, Index: index, Tied: !first && !rest, At: start + piece.Slot,
 				})
 				first = false
 			}
@@ -478,7 +536,7 @@ func (r *Rhythm) Notate(notes []Note) *Score {
 	}
 	cursor := 0
 	if len(score.Placed) > 0 {
-		cursor = floorDiv(score.Placed[0].Slot, barSlots) * barSlots
+		_, cursor, _ = barOf(score.Placed[0].Slot)
 	}
 	for _, note := range score.Placed {
 		if note.Slot > cursor {
@@ -487,8 +545,8 @@ func (r *Rhythm) Notate(notes []Note) *Score {
 		push(note.Slot, note.Slots, false, note.Index)
 		cursor = note.Slot + note.Slots
 	}
-	if rem := ((cursor % barSlots) + barSlots) % barSlots; rem != 0 {
-		push(cursor, barSlots-rem, true, -1)
+	if _, start, barSlots := barOf(cursor); cursor > start {
+		push(cursor, start+barSlots-cursor, true, -1)
 	}
 	return score
 }

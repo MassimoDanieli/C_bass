@@ -176,7 +176,7 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 
 	// the stretch being repeated
 	if s.loopOn {
-		x0, x1 := xOf(float64(s.loopA*s.perBar))-lead, xOf(float64((s.loopB+1)*s.perBar))-lead
+		x0, x1 := xOf(float64(s.pulse.BarStart(s.loopA)))-lead, xOf(float64(s.pulse.BarStart(s.loopB+1)))-lead
 		in.fill(rect{x0, staffTop - 16, x1 - x0, staffBottom - staffTop + 32}, fade(colAccent2, 0.09))
 		in.fill(rect{x0, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent2, 0.7))
 		in.fill(rect{x1 - 2, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent2, 0.7))
@@ -188,12 +188,13 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 	// beats and bar lines
 	for beat := int(math.Floor(firstBeat)); float64(beat) <= lastBeat; beat++ {
 		x := xOf(float64(beat)) - lead
-		if ((beat%s.perBar)+s.perBar)%s.perBar != 0 {
+		bar := s.pulse.BarAt(float64(beat))
+		if s.pulse.BarStart(bar) != beat {
 			in.fill(rect{x, staffBottom + 4, 1, 5}, colFaint)
 			continue
 		}
 		in.fill(rect{x - 0.75, staffTop, 1.5, staffBottom - staffTop}, colDim)
-		if bar := beat / s.perBar; beat >= 0 {
+		if beat >= 0 {
 			in.label(fmt.Sprint(bar+1), x+5, staffTop-17, 12, medium, colDim, left)
 		}
 	}
@@ -262,8 +263,7 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 // a dot for a dotted value, a slur where a note runs on into the next sign.
 func (g *Game) drawValues(c *canvas, s *song, xOf func(float64) float32, staffBottom float32, firstSlot, lastSlot int, now float64, lineOf func(int) float32) {
 	symbols := s.score.Symbols
-	barSlots := s.score.BarSlots
-	slotOf := func(symbol rhythm.Symbol) int { return symbol.Bar*barSlots + symbol.Slot }
+	slotOf := func(symbol rhythm.Symbol) int { return symbol.At }
 	top, bottom := staffBottom+16, staffBottom+40
 	from := sort.Search(len(symbols), func(i int) bool { return slotOf(symbols[i]) >= firstSlot })
 	short := func(symbol rhythm.Symbol) bool { return !symbol.Rest && symbol.Value < rhythm.Division }

@@ -61,6 +61,18 @@ type Engine struct {
 	model    []float32 // mono, the continuation to match
 	hits     []int     // frames where a drum or a cymbal is struck, in order
 
+	beats      []float64 // frames of the beats of the recording
+	strong     []bool    // which of them start a bar
+	metronome  bool
+	nextBeat   int       // the next beat the metronome has to click
+	tick, tock []float32 // the click, and the stronger one of a first beat
+	voices     []voice
+	count      []int64 // output frames of the clicks still to come before the recording starts
+	counted    int     // how many clicks the count has in all
+	musicAt    int64   // the output frame at which the recording starts after a count
+	quicken    float64 // how much faster every time round a repeated stretch
+	quickenTo  float64
+
 	pending  []float32 // interleaved, generated and not yet read
 	produced int64     // output frames generated
 	consumed int64     // output frames read
@@ -76,6 +88,7 @@ func NewEngine(bass, backing *audio.Buffer) *Engine {
 	e.strip = make([]float32, 2*hop)
 	e.model = make([]float32, hop)
 	e.hits = findHits(bass, backing, e.length)
+	e.tick, e.tock = clickSound(1100, 0.3), clickSound(1650, 0.4)
 	return e
 }
 
@@ -97,6 +110,9 @@ func (e *Engine) SetPlaying(playing bool) {
 		e.jumped = true
 	}
 	e.playing = playing
+	if !playing {
+		e.count, e.musicAt = e.count[:0], 0 // a count under way is dropped
+	}
 }
 
 // Playing says whether the recording is running.
@@ -320,7 +336,12 @@ func (e *Engine) block() {
 	base := len(e.pending)
 	e.pending = append(e.pending, make([]float32, hop*2)...)
 	out := e.pending[base:]
-	if !e.playing {
+	defer func() {
+		e.ring(out)
+		e.produced += hop
+	}()
+	counting := e.playing && e.produced < e.musicAt
+	if !e.playing || counting {
 		if e.tailLive { // let the last piece fade out rather than cut it
 			for i := 0; i < hop; i++ {
 				out[2*i], out[2*i+1] = e.tail[0][i], e.tail[1][i]
@@ -329,12 +350,21 @@ func (e *Engine) block() {
 			e.tailLive = false
 		}
 		e.note(mark{e.produced, e.position, 0})
-		e.produced += hop
+		if counting {
+			// the clicks of the bar counted in before the recording starts
+			for len(e.count) > 0 && e.count[0] < e.produced+hop {
+				e.strike(int(e.count[0]-e.produced), len(e.count) == e.counted)
+				e.count = e.count[1:]
+			}
+			e.jumped = true
+		}
 		return
 	}
 	start := int(math.Round(e.position))
 	if e.jumped {
 		e.jumped = false
+		// somewhere new: the next beat to click is the first one from here on
+		e.nextBeat = sort.SearchFloat64s(e.beats, float64(start))
 	} else {
 		start = e.align(start)
 	}
@@ -348,15 +378,123 @@ func (e *Engine) block() {
 	}
 	e.tailLive = true
 	e.note(mark{e.produced, float64(start), e.speed})
-	e.produced += hop
+	// The beats that fall in what this block plays, each at its place in the block. A block
+	// plays its piece of the recording at the recording's own speed, whatever the speed asked:
+	// slowing down is pieces played again, and a beat already clicked is not clicked again.
+	for ; e.nextBeat < len(e.beats) && e.beats[e.nextBeat] < float64(start+hop); e.nextBeat++ {
+		if e.metronome {
+			e.strike(int(e.beats[e.nextBeat])-start, e.strong[e.nextBeat])
+		}
+	}
 	e.natural = start + hop
 	e.position += hop * e.speed
 	switch {
 	case e.loopOn && e.position >= e.loopB && e.position-hop*e.speed < e.loopB:
 		e.position, e.jumped = e.loopA, true
+		if e.quicken > 0 && e.speed < e.quickenTo { // every time round a little faster
+			e.speed = math.Min(e.quickenTo, e.speed+e.quicken)
+		}
 	case e.position >= float64(e.length):
 		e.position, e.playing = float64(e.length), false
 	}
+}
+
+// voice is a click still sounding.
+type voice struct {
+	sound []float32
+	at    int // the next sample to play; negative while it has not started in this block
+}
+
+// strike starts a click at an offset into the block being generated.
+func (e *Engine) strike(offset int, strong bool) {
+	sound := e.tick
+	if strong {
+		sound = e.tock
+	}
+	e.voices = append(e.voices, voice{sound, -max(0, min(hop-1, offset))})
+}
+
+// ring adds the clicks that are sounding to a block of output.
+func (e *Engine) ring(out []float32) {
+	kept := e.voices[:0]
+	for _, v := range e.voices {
+		for i := 0; i < hop; i++ {
+			at := v.at + i
+			if at < 0 {
+				continue
+			}
+			if at >= len(v.sound) {
+				break
+			}
+			out[2*i] = clip(out[2*i] + v.sound[at])
+			out[2*i+1] = clip(out[2*i+1] + v.sound[at])
+		}
+		if v.at += hop; v.at < len(v.sound) {
+			kept = append(kept, v)
+		}
+	}
+	e.voices = kept
+}
+
+// clickSound is a short tick: a sine that dies away in a few hundredths of a second.
+func clickSound(hz, level float64) []float32 {
+	out := make([]float32, Rate*5/100)
+	for i := range out {
+		t := float64(i) / Rate
+		out[i] = float32(level * math.Exp(-t*90) * math.Sin(2*math.Pi*hz*t) * math.Min(1, t/0.0005))
+	}
+	return out
+}
+
+// SetBeats tells the engine where the beats of the recording are, in seconds, and which of
+// them start a bar: what the metronome plays.
+func (e *Engine) SetBeats(beats []float64, strong []bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.beats = make([]float64, len(beats))
+	for i, beat := range beats {
+		e.beats[i] = beat * Rate
+	}
+	e.strong = append([]bool(nil), strong...)
+	e.nextBeat = sort.SearchFloat64s(e.beats, e.position)
+}
+
+// SetMetronome turns the click on every beat on or off.
+func (e *Engine) SetMetronome(on bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.metronome = on && len(e.beats) > 0
+}
+
+// PlayCounted starts after a count: so many clicks, so far apart in seconds as heard, the
+// first one stronger. The recording starts where the next click would have been.
+func (e *Engine) PlayCounted(clicks int, apart float64) {
+	e.SetPlaying(true)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	every := int64(apart * Rate)
+	first := e.produced + int64(len(e.pending)/2) // after what has been generated and not yet read
+	e.count = e.count[:0]
+	for i := 0; i < clicks; i++ {
+		e.count = append(e.count, first+int64(i)*every)
+	}
+	e.counted = clicks
+	e.musicAt = first + int64(clicks)*every
+}
+
+// Counting says whether the count before the recording is still going.
+func (e *Engine) Counting() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.playing && e.produced < e.musicAt
+}
+
+// SetQuicken makes a stretch being repeated go a little faster every time round, by step, up
+// to a top speed; a step of 0 leaves the speed alone.
+func (e *Engine) SetQuicken(step, top float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.quicken, e.quickenTo = step, top
 }
 
 func clip(v float32) float32 {

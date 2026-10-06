@@ -40,3 +40,28 @@ func TestLockedAndUnplayable(t *testing.T) {
 		t.Fatal("a note below the open strings cannot be placed")
 	}
 }
+
+// Asked to stay low, a line that fits near the nut is played there, and only the notes that
+// are not to be found there go higher.
+func TestLowPosition(t *testing.T) {
+	var line []transcribe.Event
+	for i, midi := range []int{33, 45, 43, 40, 33, 36, 38, 40, 45, 43, 52, 50, 45, 33} {
+		line = append(line, transcribe.Event{Start: float64(i) * 0.3, End: float64(i)*0.3 + 0.28, Midi: midi})
+	}
+	tuning := TuningFor("5")
+	for _, event := range FingerWith(line, tuning, 12, true) {
+		if tuning.Open[event.String]+event.Fret != event.Midi {
+			t.Fatalf("string %d fret %d does not give %d", event.String, event.Fret, event.Midi)
+		}
+		highest := tuning.Open[len(tuning.Open)-1] + firstPosition
+		if event.Fret > firstPosition && event.Midi <= highest {
+			t.Errorf("%s is played at fret %d, though it is found in first position", NoteName(event.Midi), event.Fret)
+		}
+	}
+	// left free, the same line is allowed up the neck; it must still be playable
+	for _, event := range Finger(line, tuning, 12) {
+		if event.String < 0 {
+			t.Fatalf("%s has no place", NoteName(event.Midi))
+		}
+	}
+}

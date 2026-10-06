@@ -142,3 +142,47 @@ func TestLateNotesAreWrittenOnTheirBeat(t *testing.T) {
 		}
 	}
 }
+
+// A bar of two beats in a piece in four: every bar after it starts two beats earlier, and a
+// note held across it is cut at its lines, not at where the lines would have been.
+func TestABarOfItsOwnLength(t *testing.T) {
+	r := Steady(120, 30, 4)
+	r.SetBeatsIn(2, 2)
+	for bar, want := range []int{0, 4, 8, 10, 14} {
+		if got := r.BarStart(bar); got != want {
+			t.Errorf("bar %d starts at beat %d, want %d", bar+1, got, want)
+		}
+	}
+	if r.BarStart(-1) != -4 {
+		t.Errorf("the pickup bar starts at beat %d", r.BarStart(-1))
+	}
+	for _, c := range []struct {
+		beats float64
+		bar   int
+	}{{-0.5, -1}, {0, 0}, {7.9, 1}, {8, 2}, {9.9, 2}, {10, 3}, {13.9, 3}, {14, 4}} {
+		if got := r.BarAt(c.beats); got != c.bar {
+			t.Errorf("beat %.1f is in bar %d, want %d", c.beats, got+1, c.bar+1)
+		}
+	}
+	// one note from beat 6 to beat 12: half of bar 2, all of the short bar 3, half of bar 4
+	score := r.Notate([]Note{{Start: 3, End: 6}})
+	var got []Symbol
+	for _, symbol := range score.Symbols {
+		if !symbol.Rest {
+			got = append(got, symbol)
+		}
+	}
+	want := []Symbol{{Bar: 1, Slot: 8, Value: 8, At: 24}, {Bar: 2, Slot: 0, Value: 8, Tied: true, At: 32}, {Bar: 3, Slot: 0, Value: 8, Tied: true, At: 40}}
+	if len(got) != len(want) {
+		t.Fatalf("written as %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("sign %d is %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	r.SetBeatsIn(2, 4) // back to the usual
+	if len(r.Odd) != 0 || r.BarStart(3) != 12 {
+		t.Errorf("the bar did not go back to four beats: %+v", r.Odd)
+	}
+}

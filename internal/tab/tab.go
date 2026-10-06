@@ -24,7 +24,7 @@ func Text(title string, events []transcribe.Event, pulse *rhythm.Rhythm, tuning 
 	}
 	score := pulse.Notate(notes)
 	const cell = 3 // characters per sixteenth
-	width := score.BarSlots * cell
+	width := func(bar int) int { return pulse.BeatsIn(bar) * rhythm.Division * cell }
 	names := tuning.StringNames()
 	strings_ := len(tuning.Open)
 
@@ -37,9 +37,9 @@ func Text(title string, events []transcribe.Event, pulse *rhythm.Rhythm, tuning 
 	get := func(index int) *bar {
 		b := bars[index]
 		if b == nil {
-			b = &bar{rows: make([][]byte, strings_), values: []byte(strings.Repeat(" ", width))}
+			b = &bar{rows: make([][]byte, strings_), values: []byte(strings.Repeat(" ", width(index)))}
 			for s := range b.rows {
-				b.rows[s] = []byte(strings.Repeat("-", width))
+				b.rows[s] = []byte(strings.Repeat("-", width(index)))
 			}
 			bars[index] = b
 			if last < first || index < first {
@@ -94,7 +94,7 @@ func Text(title string, events []transcribe.Event, pulse *rhythm.Rhythm, tuning 
 			if index >= 0 {
 				label = fmt.Sprint(index + 1)
 			}
-			fmt.Fprintf(&out, " %-*s", width, label)
+			fmt.Fprintf(&out, " %-*s", width(index), label)
 		}
 		out.WriteString("\n")
 		for s := strings_ - 1; s >= 0; s-- {
@@ -104,7 +104,7 @@ func Text(title string, events []transcribe.Event, pulse *rhythm.Rhythm, tuning 
 				if b := bars[index]; b != nil {
 					out.Write(b.rows[s])
 				} else {
-					out.WriteString(strings.Repeat("-", width))
+					out.WriteString(strings.Repeat("-", width(index)))
 				}
 			}
 			out.WriteString("|\n")
@@ -115,7 +115,7 @@ func Text(title string, events []transcribe.Event, pulse *rhythm.Rhythm, tuning 
 			if b := bars[index]; b != nil {
 				out.Write(b.values)
 			} else {
-				out.WriteString(strings.Repeat(" ", width))
+				out.WriteString(strings.Repeat(" ", width(index)))
 			}
 		}
 		out.WriteString("\n\n")
