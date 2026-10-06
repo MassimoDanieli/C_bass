@@ -15,7 +15,7 @@ C_bass non contiene il modello: lo scarica la prima volta e lo tiene nella cache
 
 | | |
 |---|---|
-| File | `htdemucs.onnx`, 174 MB: la rete esportata in formato ONNX |
+| File | `htdemucs.onnx`, 174 MB: la rete esportata in formato ONNX da Kevin Gibbons per [demucs-js](https://github.com/bakkot/demucs-js); è il file del pacchetto npm `demucs` 1.0.0 |
 | Indirizzo | `https://basso.massimodanieli.com/assets/separator/htdemucs.onnx` (il sito di Manico, che serve lo stesso file ai browser) |
 | Impronta SHA-256 | `da9e5101ee0804d04933974b59d8aae9c862e80e14f2f24e7c74cae76bdbe748` |
 
@@ -27,7 +27,7 @@ Per usare un altro file (una copia locale, o un altro modello con gli stessi ing
 
 Il **codice** di Demucs è pubblicato con licenza MIT.
 
-I **pesi** sono un'altra cosa. Sono stati allenati, tra l'altro, su MUSDB18-HQ, una raccolta di brani concessa per uso didattico e di ricerca, non commerciale. Se e quanto quelle condizioni seguano i pesi è una questione che gli autori non hanno chiuso e su cui chi scrive non è in grado di dare una risposta legale.
+I **pesi** sono un'altra cosa. Il pacchetto da cui viene il file lo dice così: il file dei pesi «non è coperto» dalla licenza MIT, «deriva da un file di pesi fornito da Meta, reso disponibile solo per uso personale e di ricerca». Sono stati allenati, tra l'altro, su MUSDB18-HQ, una raccolta di brani concessa per uso didattico e di ricerca, non commerciale. Chi scrive non è in grado di dare una risposta legale su fin dove arrivino queste condizioni.
 
 Quindi:
 
@@ -47,8 +47,8 @@ C_bass does not contain the model: it downloads it on first use and keeps it in 
 
 **What it is.** `htdemucs`, the Hybrid Transformer Demucs network by Alexandre Défossez and colleagues (Meta AI), which splits a recording into drums, bass, vocals and the rest. C_bass uses the bass, and the sum of the other three as "the rest". Paper: Rouard, Massa, Défossez, *Hybrid Transformers for Music Source Separation*, 2022. Original code and weights: <https://github.com/facebookresearch/demucs>.
 
-**Where C_bass gets it.** `htdemucs.onnx`, 174 MB, the network exported to ONNX, from `https://basso.massimodanieli.com/assets/separator/htdemucs.onnx` (Manico's site, which serves the same file to browsers), SHA-256 `da9e5101ee0804d04933974b59d8aae9c862e80e14f2f24e7c74cae76bdbe748`. The hash is checked after the download; address and hash are in `internal/provision/provision.go`. To use another file, set `CBASS_MODEL=/path/to/file.onnx`; for another ONNX Runtime library, `CBASS_ORT_LIB`.
+**Where C_bass gets it.** `htdemucs.onnx`, 174 MB, the network exported to ONNX by Kevin Gibbons for [demucs-js](https://github.com/bakkot/demucs-js) (the file of the npm package `demucs` 1.0.0), from `https://basso.massimodanieli.com/assets/separator/htdemucs.onnx` (Manico's site, which serves the same file to browsers), SHA-256 `da9e5101ee0804d04933974b59d8aae9c862e80e14f2f24e7c74cae76bdbe748`. The hash is checked after the download; address and hash are in `internal/provision/provision.go`. To use another file, set `CBASS_MODEL=/path/to/file.onnx`; for another ONNX Runtime library, `CBASS_ORT_LIB`.
 
-**On what terms.** The Demucs *code* is MIT-licensed. The *weights* are another matter: they were trained on MUSDB18-HQ among other material, a collection licensed for educational and research use, not commercial use. Whether and how far those terms follow the weights is a question the authors have not settled and the writer cannot answer as a lawyer would. So: C_bass is given away and sells neither the model nor what it produces; anyone wanting commercial use must settle the question themselves, or use a model they have the rights to through `CBASS_MODEL`; the repository's GPL covers the code of C_bass, not the weights.
+**On what terms.** The Demucs *code* is MIT-licensed. The *weights* are another matter. The package the file comes from puts it this way: the weights file "is not covered by" the MIT licence and "is derived from a weights file provided by Meta, which is made available for personal and research use only". They were trained on MUSDB18-HQ among other material, a collection licensed for educational and research use, not commercial use. The writer cannot say, as a lawyer would, how far those terms reach. So: C_bass is given away and sells neither the model nor what it produces; anyone wanting commercial use must settle the question themselves, or use a model they have the rights to through `CBASS_MODEL`; the repository's GPL covers the code of C_bass, not the weights.
 
 **What comes out of the model.** The separated bass and the rest stay in the user's recordings folder. They derive from the original recording and follow its rights: C_bass sends them nowhere.
