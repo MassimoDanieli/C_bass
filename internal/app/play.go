@@ -257,6 +257,7 @@ func (g *Game) exportMenu(c *canvas, under rect, s *song) {
 	items := []struct{ kind, text string }{
 		{"pdf", g.t("PDF da stampare", "PDF to print")},
 		{"musicxml", g.t("MusicXML (Guitar Pro, MuseScore)", "MusicXML (Guitar Pro, MuseScore)")},
+		{"midi", g.t("MIDI, a tempo con la registrazione", "MIDI, in time with the recording")},
 		{"text", g.t("Tablatura in testo", "Tablature as text")},
 	}
 	box := rect{under.x + under.w - 290, under.y + under.h + 6, 290, float32(len(items))*38 + 12}

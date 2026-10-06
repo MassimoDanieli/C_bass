@@ -383,7 +383,7 @@ func (g *Game) takeShot(target *ebiten.Image) {
 			case "key":
 				g.song.moveKey(2)
 			case "export":
-				for _, kind := range []string{"text", "musicxml", "pdf"} {
+				for _, kind := range []string{"text", "musicxml", "midi", "pdf"} {
 					g.export(g.song, kind)
 				}
 			case "low":

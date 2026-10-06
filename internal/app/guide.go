@@ -88,7 +88,7 @@ func (g *Game) helpParts() []part {
 		{t("Strumento ed esportazione", "Instrument and export"), [][2]string{
 			{t("4, 5, 6 corde", "4, 5, 6 strings"), t("la diteggiatura si ricalcola per lo strumento scelto", "the fingering is worked out again for the instrument chosen")},
 			{t("primi tasti", "first frets"), t("tiene la mano vicino al capotasto dove la linea lo permette; «tutto il manico» la manda dove si sposta di meno", "keeps the hand near the nut where the line allows; \"whole neck\" sends it where it moves least")},
-			{t("Esporta", "Export"), t("scrive la parte nella cartella dei download: PDF da stampare, MusicXML per Guitar Pro e MuseScore, tablatura in testo", "writes the part to the Downloads folder: a PDF to print, MusicXML for Guitar Pro and MuseScore, text tablature")},
+			{t("Esporta", "Export"), t("scrive la parte nella cartella dei download: PDF da stampare, MusicXML per Guitar Pro e MuseScore, MIDI a tempo con la registrazione, tablatura in testo", "writes the part to the Downloads folder: a PDF to print, MusicXML for Guitar Pro and MuseScore, MIDI in time with the recording, text tablature")},
 		}},
 		{t("Quando non torna", "When it is not right"), [][2]string{
 			{"", t("Il programma legge meglio un basso suonato chiaro in un brano registrato bene. Sbaglia più facilmente con bassi sintetici molto gravi, note ribattute legate, e brani in cui il basso si sente appena: lì la separazione può non trovarlo. Gli accordi sono una proposta: vanno controllati a orecchio. Tutto si può correggere a mano.",

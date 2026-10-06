@@ -62,6 +62,10 @@ func (g *Game) export(s *song, kind string) {
 		copied := *s.project
 		copied.Title = title
 		data, ending = export.PDF(&copied, g.noteName), ".pdf"
+	case "midi":
+		copied := *s.project
+		copied.Title = title
+		data, ending = export.MIDI(&copied), ".mid"
 	case "musicxml":
 		copied := *s.project
 		copied.Title = title
