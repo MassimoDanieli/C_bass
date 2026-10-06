@@ -22,7 +22,7 @@ Durante la riproduzione:
 
 - la **tablatura** scorre sotto una linea ferma: un numero la raggiunge quando la sua nota suona. Una nota tenuta è scritta una volta sola, con una linea lunga quanto dura; sotto il rigo ci sono i valori (gambo, tagli, punto);
 - il **manico** mostra la sola nota da suonare: piena mentre suona, un cerchio vuoto per la prossima;
-- **velocità** dal 40% al 120% senza cambiare l'intonazione;
+- **velocità** dal 40% al 120% senza cambiare l'intonazione, e senza ribattere le note: l'attacco passa una volta sola, il tempo si recupera nella nota che suona;
 - **ripeti** da una battuta a un'altra;
 - volume separato per il **basso** e per **il resto**: basso a zero per suonarci sopra, il resto a zero per sentire solo il basso;
 - strumento a 4, 5 o 6 corde: la diteggiatura si ricalcola.
@@ -94,7 +94,7 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 **Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It gives the same results as Manico 7.2.0: on the test track (4:48) all 984 notes and 705 beats match one for one. The window is in its first version; the applications for macOS (Apple Silicon) and Windows are built on every push and downloaded from the Actions tab, with no installer yet.
 
-**The application.** Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch, a stretch of bars can be repeated, and the bass and the rest each have their own volume. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
+**The application.** Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
 
 **Command line.** `cbass -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. `cbass help` lists the options.
 

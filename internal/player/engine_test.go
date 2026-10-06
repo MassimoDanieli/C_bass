@@ -3,9 +3,11 @@ package player
 import (
 	"encoding/binary"
 	"math"
+	"sort"
 	"testing"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
+	"github.com/MassimoDanieli/c_bass/internal/transcribe"
 )
 
 func tone(seconds, hz float64, level float32) *audio.Buffer {
@@ -145,5 +147,87 @@ func TestPausedIsSilentAndStaysPut(t *testing.T) {
 	}
 	if at := e.At(e.Consumed()); math.Abs(at-1) > 1e-9 {
 		t.Fatalf("moved to %f while paused", at)
+	}
+}
+
+// groove makes a bass line of notes of several lengths, one straight after the other, and
+// the drums to go with it: the kind of thing that is slowed down to be learned.
+func groove(bars int) (bass, drums *audio.Buffer) {
+	const beat = 60.0 / 104
+	total := float64(bars)*4*beat + 1
+	bass, drums = silence(total), silence(total)
+	add := func(to *audio.Buffer, at, seconds float64, sample func(t float64) float64) {
+		start := int(at * Rate)
+		for i := 0; i < int(seconds*Rate) && start+i < to.Len(); i++ {
+			v := float32(sample(float64(i) / Rate))
+			to.Channels[0][start+i] += v
+			to.Channels[1][start+i] += v
+		}
+	}
+	figure := []struct{ at, length, above int }{{0, 3, 0}, {3, 1, 0}, {4, 2, 7}, {6, 2, 12}, {8, 4, 10}, {12, 1, 7}, {13, 1, 5}, {14, 2, 3}}
+	roots := []int{33, 36, 38, 31}
+	for bar := 0; bar < bars; bar++ {
+		for _, n := range figure {
+			hz := 440 * math.Pow(2, float64(roots[bar%len(roots)]+n.above-69)/12)
+			length := float64(n.length) * beat / 4 * 0.92
+			add(bass, 0.3+(float64(bar)*16+float64(n.at))*beat/4, length, func(t float64) float64 {
+				envelope := math.Min(1, t/0.006) * math.Exp(-t*1.4) * math.Min(1, (length-t)/0.02)
+				return 0.3 * envelope * (math.Sin(2*math.Pi*hz*t) + 0.5*math.Sin(4*math.Pi*hz*t) + 0.2*math.Sin(6*math.Pi*hz*t))
+			})
+		}
+	}
+	seed := uint32(1)
+	noise := func() float64 {
+		seed = seed*1664525 + 1013904223
+		return float64(seed>>8)/float64(1<<23) - 1
+	}
+	for n := 0; float64(n)*beat/2 < total-0.3; n++ {
+		at := 0.3 + float64(n)*beat/2
+		add(drums, at, 0.04, func(t float64) float64 { return 0.07 * math.Exp(-t*90) * noise() })
+		if n%4 == 0 {
+			add(drums, at, 0.2, func(t float64) float64 {
+				return 0.5 * math.Exp(-t*22) * math.Sin(2*math.Pi*(48+70*math.Exp(-t*38))*t)
+			})
+		}
+	}
+	return bass, drums
+}
+
+// played returns the bass as it comes out at a speed, the drums being there but silent.
+func played(bass, drums *audio.Buffer, speed float64) *audio.Buffer {
+	e := NewEngine(bass, drums)
+	e.SetGains(1, 0)
+	e.SetSpeed(speed)
+	e.SetPlaying(true)
+	left := pull(e, int(bass.Duration()/speed*Rate))
+	return &audio.Buffer{SampleRate: Rate, Channels: [][]float32{left, left}}
+}
+
+// Slowed down, every note must still be struck once. Slowing down plays some of the
+// recording twice, and if that is the start of a note, two notes are heard: the notes are
+// read back from what comes out, and there must be as many as went in, at an even pace.
+func TestSlowedDownEachNoteIsStruckOnce(t *testing.T) {
+	bass, drums := groove(8)
+	written := transcribe.Transcribe(bass, transcribe.Options{Isolated: true})
+	if len(written) != 64 {
+		t.Fatalf("the line has 64 notes, %d were read", len(written))
+	}
+	for _, speed := range []float64{0.9, 0.8, 0.7, 0.6, 0.5, 1.2} {
+		heard := transcribe.Transcribe(played(bass, drums, speed), transcribe.Options{Isolated: true})
+		if len(heard) != len(written) {
+			t.Errorf("at %.0f%% the %d notes came out as %d", speed*100, len(written), len(heard))
+			continue
+		}
+		var early []float64
+		for i := range heard {
+			if heard[i].Midi != written[i].Midi {
+				t.Errorf("at %.0f%% note %d came out as %d, not %d", speed*100, i, heard[i].Midi, written[i].Midi)
+			}
+			early = append(early, written[i].Start/speed-heard[i].Start)
+		}
+		sort.Float64s(early)
+		if spread := early[len(early)-1] - early[0]; spread > 0.12 {
+			t.Errorf("at %.0f%% the notes are up to %.0f ms out of step with one another", speed*100, spread*1000)
+		}
 	}
 }

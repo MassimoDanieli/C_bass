@@ -5,6 +5,7 @@ package player
 import (
 	"encoding/binary"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
@@ -33,6 +34,12 @@ type mark struct {
 // pieces of the recording (WSOLA): each piece is placed where its waves continue those of the
 // piece before, so the pitch stays what it was. At full speed the pieces follow one another
 // exactly and the recording comes out untouched.
+//
+// Slowing down means playing some of the recording twice, and an attack played twice is
+// heard as two notes. So a piece only goes back a little, less than its own length, and only
+// to a place that sounds like what would have come next: that is true of a note ringing,
+// never of an attack. Around an attack the recording runs on at its own speed, and the time
+// is made up in the note that follows.
 type Engine struct {
 	mu            sync.Mutex
 	bass, backing *audio.Buffer
@@ -52,6 +59,7 @@ type Engine struct {
 	window   [frame]float32
 	strip    []float32 // mono, around the nominal place
 	model    []float32 // mono, the continuation to match
+	hits     []int     // frames where a drum or a cymbal is struck, in order
 
 	pending  []float32 // interleaved, generated and not yet read
 	produced int64     // output frames generated
@@ -65,8 +73,9 @@ func NewEngine(bass, backing *audio.Buffer) *Engine {
 	for i := range e.window {
 		e.window[i] = float32(0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/frame))
 	}
-	e.strip = make([]float32, 2*reach+hop)
+	e.strip = make([]float32, 2*hop)
 	e.model = make([]float32, hop)
+	e.hits = findHits(bass, backing, e.length)
 	return e
 }
 
@@ -154,36 +163,156 @@ func (e *Engine) mono(out []float32, i int) {
 	}
 }
 
-// align finds, near the nominal place, the start whose waves best continue the previous piece.
+const (
+	// patience is how far the sound may run ahead of where it should be, or fall behind,
+	// while waiting for a place where going back or skipping will not be heard: 50 ms. More
+	// would spare more attacks, and make the rhythm uneven.
+	patience = Rate * 5 / 100
+	// least is the smallest step back or forward worth taking: 2.5 ms. Anything nearer is the
+	// same wave barely moved, which always looks alike.
+	least = Rate / 400
+	// alike is how well a place must match what would have come next, from -1 to 1.
+	alike = 0.5
+	// settle is how long after a hit its sound is left alone: 10 ms.
+	settle = Rate / 100
+)
+
+// align chooses where the next piece starts. While the sound is close to where it should be,
+// the previous piece simply carries on. Once it has drifted, the piece goes back (or forward,
+// when speeding up) by no more than its own half, to the place that best continues the
+// waves; and if no place does, because an attack is in the way, it waits.
 func (e *Engine) align(nominal int) int {
-	if d := e.natural - nominal; d >= -reach && d <= reach {
-		return e.natural // the previous piece simply carries on
+	ahead := e.natural - nominal
+	if ahead >= -reach && ahead <= reach {
+		return e.natural
+	}
+	waiting := ahead < patience && -ahead < patience
+	var low, high, wanted int
+	if ahead > 0 {
+		low, high, wanted = e.natural-hop, e.natural-least, e.natural-min(ahead, hop)
+		// A drum or a cymbal struck in what would be played again, or still to come in the
+		// fading end of the previous piece, would be heard twice: start after it has rung.
+		if hit, ok := e.hitBefore(e.natural + hop*7/8); ok && hit+settle > low && waiting {
+			low = hit + settle
+		}
+	} else {
+		low, high, wanted = e.natural+least, e.natural+hop, e.natural+min(-ahead, hop)
+		// One struck in what would be skipped would be lost: keep it well inside the new piece.
+		if hit, ok := e.hitAfter(e.natural + hop/8); ok && hit-hop*3/4 < high && waiting {
+			high = hit - hop*3/4
+		}
+	}
+	if low > high {
+		return e.natural
+	}
+	start, likeness := e.search(low, high, wanted)
+	if likeness < alike && waiting {
+		return e.natural
+	}
+	return start
+}
+
+// findHits returns where something is struck: a sudden rise of the level high up, above the
+// harmonics of the bass, where drums, cymbals and the click of a plucked string are. A plain
+// rise of the whole level would not do: the level of a low note swells with every one of its
+// waves. The attacks of the bass itself need no list, a note never looks like the one before.
+func findHits(bass, backing *audio.Buffer, length int) []int {
+	const step = 256 // 6 ms
+	steps := length / step
+	if steps < 8 {
+		return nil
+	}
+	level := make([]float64, steps)
+	smooth := 1 - math.Exp(-2*math.Pi*2000/Rate)
+	var held, top float64
+	for i := 0; i < steps*step; i++ {
+		v := float64(bass.Channels[0][i] + bass.Channels[1][i] + backing.Channels[0][i] + backing.Channels[1][i])
+		held += smooth * (v - held)
+		level[i/step] += (v - held) * (v - held)
+	}
+	for _, v := range level {
+		top = math.Max(top, v)
+	}
+	floor := top * 1e-4
+	var hits []int
+	last := -100
+	for i := 6; i < steps; i++ {
+		before := 0.0
+		for _, v := range level[i-6 : i] {
+			before = math.Max(before, v)
+		}
+		if level[i] > floor && level[i] > 2*before && i-last > 5 {
+			hits = append(hits, i*step)
+			last = i
+		}
+	}
+	return hits
+}
+
+// hitBefore is the last hit at or before a frame.
+func (e *Engine) hitBefore(frame int) (int, bool) {
+	i := sort.SearchInts(e.hits, frame+1) - 1
+	if i < 0 {
+		return 0, false
+	}
+	return e.hits[i], true
+}
+
+// hitAfter is the first hit at or after a frame.
+func (e *Engine) hitAfter(frame int) (int, bool) {
+	i := sort.SearchInts(e.hits, frame)
+	if i >= len(e.hits) {
+		return 0, false
+	}
+	return e.hits[i], true
+}
+
+// search finds, between low and high, the start whose waves best continue the previous
+// piece, leaning towards the wanted one when several do as well. It also says how alike
+// the two are, from -1 to 1.
+func (e *Engine) search(low, high, wanted int) (int, float64) {
+	span := high - low
+	if need := span + hop; len(e.strip) < need {
+		e.strip = make([]float32, need)
 	}
 	e.mono(e.model, e.natural)
-	e.mono(e.strip, nominal-reach)
-	score := func(offset, step int) float64 {
-		var dot, energy float64
-		for k := 0; k < hop; k += step {
-			c := float64(e.strip[offset+k])
-			dot += float64(e.model[k]) * c
-			energy += c * c
+	e.mono(e.strip[:span+hop], low)
+	between := func(offset, step, from, to int) float64 {
+		var dot, ours, theirs float64
+		for k := from; k < to; k += step {
+			m, c := float64(e.model[k]), float64(e.strip[offset+k])
+			dot += m * c
+			ours += m * m
+			theirs += c * c
 		}
-		return dot / math.Sqrt(energy+1e-9)
+		if ours < 1e-7 && theirs < 1e-7 {
+			return 1 // silence continues silence
+		}
+		return dot / math.Sqrt(ours*theirs+1e-12)
 	}
-	best, bestScore := reach, math.Inf(-1)
+	score := func(offset, step int) float64 {
+		return between(offset, step, 0, hop) - 0.15*math.Abs(float64(low+offset-wanted))/hop
+	}
+	best, bestScore := 0, math.Inf(-1)
 	const coarse = 6
-	for offset := 0; offset <= 2*reach; offset += coarse {
+	for offset := 0; offset <= span; offset += coarse {
 		if s := score(offset, coarse); s > bestScore {
 			best, bestScore = offset, s
 		}
 	}
 	fine, fineScore := best, math.Inf(-1)
-	for offset := max(0, best-coarse); offset <= min(2*reach, best+coarse); offset++ {
+	for offset := max(0, best-coarse); offset <= min(span, best+coarse); offset++ {
 		if s := score(offset, 2); s > fineScore {
 			fine, fineScore = offset, s
 		}
 	}
-	return nominal - reach + fine
+	// Alike all the way: a note starting late in the stretch must not hide behind the rest.
+	likeness := 1.0
+	const parts = 3
+	for part := 0; part < parts; part++ {
+		likeness = math.Min(likeness, between(fine, 1, part*hop/parts, (part+1)*hop/parts))
+	}
+	return low + fine, likeness
 }
 
 // block generates the next hop frames of output.

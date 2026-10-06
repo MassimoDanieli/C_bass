@@ -193,9 +193,7 @@ jobs:
           mkdir out
           cp built/C_bass-macos-arm64/C_bass-macos-arm64.zip out/
           cp built/C_bass-windows-x64/C_bass.exe out/C_bass-windows-x64.exe
-          cp built/window-cbass-macos-arm64/window.png out/window-macos.png
-          cp built/window-cbass-windows-x64/window.png out/window-windows.png
           gh release delete "$TAG" --yes 2>/dev/null || true
           gh release create "$TAG" --draft --prerelease --target "$GITHUB_SHA" --title "C_bass $TAG" \
-            --notes "macOS (Apple Silicon): C_bass-macos-arm64.zip. Windows: C_bass-windows-x64.exe. The two pictures are the window as each build machine drew it." \
+            --notes "macOS (Apple Silicon): C_bass-macos-arm64.zip. Windows: C_bass-windows-x64.exe." \
             out/*
