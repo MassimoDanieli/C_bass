@@ -101,16 +101,19 @@ func (g *Game) playHeader(c *canvas, r rect, s *song, now float64) {
 		g.goHome()
 		return
 	}
+	if g.button(c, "language", rect{r.w - 20 - 44, 15, 44, 34}, g.t("EN", "IT"), quiet) {
+		g.switchLanguage()
+	}
 	names := ""
 	for _, open := range s.tuning.Open {
 		names += " " + g.noteName(open)
 	}
 	tuningText := fmt.Sprintf("%d %s  ·", len(s.tuning.Open), g.t("corde", "strings")) + names
-	tuning := rect{r.w - 20 - 230, 15, 230, 34}
+	tuning := rect{r.w - 20 - 44 - 10 - 230, 15, 230, 34}
 	bars := fmt.Sprintf("%s %d", g.t("battuta", "bar"), s.bar(now)+1)
 	c.label(bars, tuning.x-18, 32, 14, regular, colDim, right)
 	room := tuning.x - 18 - c.width(bars, 14, regular) - 24 - 130
-	title := c.fit(s.project.Title, 19, bold, room*0.62)
+	title := c.fit(g.titleOf(s.project.Title, s.project.Key), 19, bold, room*0.62)
 	c.label(title, 130, 32, 19, bold, colText, left)
 	about := fmt.Sprintf("%.0f BPM  ·  %d/4  ·  %d %s", s.pulse.Tempo(), s.perBar, len(s.project.Events), g.t("note", "notes"))
 	c.label(c.fit(about, 14, regular, room-c.width(title, 19, bold)-18), 130+c.width(title, 19, bold)+18, 33, 14, regular, colDim, left)
@@ -174,9 +177,9 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 	// the stretch being repeated
 	if s.loopOn {
 		x0, x1 := xOf(float64(s.loopA*s.perBar))-lead, xOf(float64((s.loopB+1)*s.perBar))-lead
-		in.fill(rect{x0, staffTop - 16, x1 - x0, staffBottom - staffTop + 32}, fade(colAccent, 0.07))
-		in.fill(rect{x0, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent, 0.6))
-		in.fill(rect{x1 - 2, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent, 0.6))
+		in.fill(rect{x0, staffTop - 16, x1 - x0, staffBottom - staffTop + 32}, fade(colAccent2, 0.09))
+		in.fill(rect{x0, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent2, 0.7))
+		in.fill(rect{x1 - 2, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent2, 0.7))
 	}
 	// the strings
 	for str := 0; str < strings; str++ {
@@ -408,8 +411,8 @@ func (g *Game) drawNeck(c *canvas, r rect, s *song, now float64) {
 		if event.String >= 0 && event.String < strings && event.Fret <= frets {
 			x, y := place(event.String, event.Fret)
 			c.disc(x, y, radius, fade(colPanel, 0.75))
-			c.ring(x, y, radius, 2, colAccent)
-			c.label(g.noteName(event.Midi), x, y, radius*0.8, bold, colAccent, centre)
+			c.ring(x, y, radius, 2, colAccent2)
+			c.label(g.noteName(event.Midi), x, y, radius*0.8, bold, colAccent2, centre)
 		}
 		g.neckCaption(c, r, s, i, false)
 	}
@@ -431,7 +434,7 @@ func (g *Game) neckCaption(c *canvas, r rect, s *song, index int, sounding bool)
 	ink := colAccent
 	if !sounding {
 		text = g.t("poi  ", "next  ") + text
-		ink = colDim
+		ink = colAccent2
 	}
 	c.label(text, r.x+r.w-28, r.y+16, 13, medium, ink, right)
 }
@@ -448,7 +451,7 @@ func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 	c.label(clock(duration), r.x+r.w-22, track.y+8, 13, regular, colDim, right)
 	if s.loopOn && c.painting() && duration > 0 {
 		a, b := float32(s.barStart(s.loopA)/duration), float32(s.barStart(s.loopB+1)/duration)
-		c.round(rect{track.x + track.w*a, track.y - 2, max(3, track.w*(b-a)), 20}, 4, fade(colAccent, 0.2))
+		c.round(rect{track.x + track.w*a, track.y - 2, max(3, track.w*(b-a)), 20}, 4, fade(colAccent2, 0.25))
 	}
 	fraction := 0.0
 	if duration > 0 {

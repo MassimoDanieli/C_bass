@@ -33,6 +33,10 @@ Cosa è cambiato: l'altezza si legge dall'intera nota e non da ogni centesimo di
 
 Si apre `C_bass` e si trascina un brano (MP3 o WAV) nella finestra, oppure lo si sceglie con «Scegli un file…». La prima volta il brano viene analizzato (circa un minuto); poi resta nell'elenco e si riapre subito.
 
+Nell'elenco ci sono già cinque brani scritti per il programma, con basso e batteria già separati: un blues in Mi, un funk in Mi, una bossa nova in La, un walking in Fa e un rock in Sol. Servono a provare la finestra e a farci le mani; si possono togliere.
+
+La finestra è in italiano o in inglese: segue la lingua del computer, e il pulsante in alto a destra la cambia.
+
 Durante la riproduzione:
 
 - la **tablatura** scorre sotto una linea ferma: un numero la raggiunge quando la sua nota suona. Una nota tenuta è scritta una volta sola, con una linea lunga quanto dura; sotto il rigo ci sono i valori (gambo, tagli, punto);
@@ -83,6 +87,7 @@ Legge MP3 e WAV.
 | `internal/project` | tutto il percorso, dal brano alla parte: lo usano riga di comando e finestra |
 | `internal/library` | i brani già analizzati |
 | `internal/player` | riproduzione: due tracce, velocità variabile a intonazione ferma (WSOLA), ripetizione |
+| `internal/demo` | i cinque brani inclusi: scritti in codice, suonati da un sintetizzatore a corda pizzicata |
 | `internal/app` | la finestra ([Ebitengine](https://ebitengine.org)) |
 | `cmd/cbass`, `cmd/cbass-app` | la riga di comando e l'applicazione |
 
@@ -112,7 +117,7 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 **Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It began as a faithful port of Manico 7.2.0; the note reader has since been redone. Measured against a score (a 3:21 recording whose bass is written in a Guitar Pro file, 155 notes): 148 right, 5 an octave off, 2 wrong and 39 extra notes before; 155 right and none extra now. That recording is a synthetic bass, the easy case; on a plucked line with repeats, octaves and muted notes from 90 to 170 BPM it went from 91–93% to 100%. The pitch is now read from the whole note rather than frame by frame, a note is not split where only its sound changes, pitch is followed between semitones, and the separated bass is measured against the recording so that what is left of no bass is not read as notes. The window is in its first version; the applications for macOS (Apple Silicon) and Windows are built on every push and downloaded from the Actions tab, with no installer yet.
 
-**The application.** Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. The bar lines can be moved by a beat, a note the reader is unsure of carries a question mark, and a recording with no bass in it is said to have none rather than given made-up notes. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
+**The application.** Five pieces written for the program come with it (a blues, a funk, a bossa nova, a walking line, a rock), bass and drums already apart, to try the window and practise on. The window is in Italian or English, following the computer's language, with a button to switch. Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. The bar lines can be moved by a beat, a note the reader is unsure of carries a question mark, and a recording with no bass in it is said to have none rather than given made-up notes. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
 
 **Command line.** `cbass -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. `cbass help` lists the options.
 

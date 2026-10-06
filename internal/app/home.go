@@ -17,8 +17,7 @@ func (g *Game) homeScreen(c *canvas) {
 	c.label("C_bass", x, 62, 34, bold, colText, left)
 	c.label(g.t("Dal brano alla parte di basso", "From a recording to a bass part"), x+2, 96, 15, regular, colDim, left)
 	if g.button(c, "language", rect{x + width - 54, 48, 54, 30}, g.t("EN", "IT"), quiet) {
-		g.settings.English = !g.settings.English
-		g.saveSettings()
+		g.switchLanguage()
 	}
 
 	drop := rect{x, 128, width, 170}
@@ -31,7 +30,7 @@ func (g *Game) homeScreen(c *canvas) {
 	}
 
 	top := drop.y + drop.h + 34
-	c.label(g.t("I tuoi brani", "Your recordings"), x, top, 13, medium, colDim, left)
+	c.label(g.t("I brani", "Recordings"), x, top, 13, medium, colDim, left)
 	list := rect{x, top + 18, width, g.h - top - 18 - 46}
 	const row = 58
 	if len(g.entries) == 0 {
@@ -60,7 +59,14 @@ func (g *Game) homeScreen(c *canvas) {
 				back = colRaised
 			}
 			inside.round(r, 10, back)
-			inside.label(inside.fit(entry.Title, 16, medium, r.w-260), r.x+18, r.y+r.h/2, 16, medium, colText, left)
+			title := g.titleOf(entry.Title, entry.Key)
+			inside.label(inside.fit(title, 16, medium, r.w-300), r.x+18, r.y+r.h/2, 16, medium, colText, left)
+			if entry.BuiltIn {
+				tag := g.t("incluso", "built in")
+				tx := r.x + 18 + inside.width(inside.fit(title, 16, medium, r.w-300), 16, medium) + 12
+				inside.round(rect{tx, r.y + r.h/2 - 9, inside.width(tag, 11, medium) + 12, 18}, 9, fade(colAccent2, 0.18))
+				inside.label(tag, tx+6, r.y+r.h/2, 11, medium, colAccent2, left)
+			}
 			about := fmt.Sprintf("%s  ·  %.0f BPM  ·  %d %s", clock(entry.Duration), entry.Tempo, entry.Notes, g.t("note", "notes"))
 			if !asking {
 				inside.label(about, remove.x-14, r.y+r.h/2, 13, regular, colDim, right)

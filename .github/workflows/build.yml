@@ -41,7 +41,7 @@ jobs:
         run: |
           go run ./tools/demosong
           go build -o cbass-app ./cmd/cbass-app
-          CBASS_OPEN=demo CBASS_SHOT_AT=9.3 CBASS_SHOT=window-linux.png timeout 120 xvfb-run -a -s "-screen 0 1280x860x24" ./cbass-app
+          CBASS_OPEN=demo-blues CBASS_SHOT_AT=9.3 CBASS_SHOT=window-linux.png timeout 120 xvfb-run -a -s "-screen 0 1280x860x24" ./cbass-app
           test -s window-linux.png
       - uses: actions/upload-artifact@v6
         with:
@@ -128,7 +128,7 @@ jobs:
         env:
           CBASS_LIBRARY: ${{ runner.temp }}/library
           CBASS_NO_AUDIO: '1'
-          CBASS_OPEN: demo
+          CBASS_OPEN: demo-blues
           CBASS_SHOT_AT: '9.3'
         run: |
           go run ./tools/demosong

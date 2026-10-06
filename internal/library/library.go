@@ -24,6 +24,8 @@ type Entry struct {
 	Tempo    float64   `json:"tempo"`
 	Notes    int       `json:"notes"`
 	Added    time.Time `json:"added"`
+	Key      string    `json:"key,omitempty"`
+	BuiltIn  bool      `json:"builtIn,omitempty"`
 }
 
 // Library is a folder of analysed recordings.
@@ -78,7 +80,16 @@ func (l *Library) List() []Entry {
 		entry.ID = folder.Name()
 		entries = append(entries, entry)
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Added.After(entries[j].Added) })
+	// one's own recordings first, the most recent on top; the pieces that came with the program after
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].BuiltIn != entries[j].BuiltIn {
+			return !entries[i].BuiltIn
+		}
+		if entries[i].BuiltIn {
+			return entries[i].ID < entries[j].ID
+		}
+		return entries[i].Added.After(entries[j].Added)
+	})
 	return entries
 }
 
@@ -104,7 +115,7 @@ func (l *Library) Save(id string, result *project.Result) error {
 	if err := writeJSON(filepath.Join(temporary, "project.json"), result.Project); err != nil {
 		return err
 	}
-	entry := Entry{ID: id, Title: result.Project.Title, Duration: result.Project.Duration, Notes: len(result.Project.Events), Added: time.Now()}
+	entry := Entry{ID: id, Title: result.Project.Title, Duration: result.Project.Duration, Notes: len(result.Project.Events), Added: time.Now(), Key: result.Project.Key, BuiltIn: result.Project.BuiltIn}
 	if result.Project.Rhythm != nil {
 		entry.Tempo = result.Project.Rhythm.Tempo()
 	}

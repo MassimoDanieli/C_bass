@@ -20,6 +20,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
+	"github.com/MassimoDanieli/c_bass/internal/demo"
+	"github.com/MassimoDanieli/c_bass/internal/fretboard"
 	"github.com/MassimoDanieli/c_bass/internal/icon"
 	"github.com/MassimoDanieli/c_bass/internal/library"
 	"github.com/MassimoDanieli/c_bass/internal/project"
@@ -35,10 +37,14 @@ const (
 
 // settings are what the program remembers from one time to the next.
 type settings struct {
-	English bool    `json:"english"`
-	Tuning  string  `json:"tuning"`
-	Bass    float64 `json:"bass"` // volume of the bass, 0 to 1.5
-	Rest    float64 `json:"rest"` // volume of everything else, 0 to 1
+	// Language is "it" or "en"; empty until chosen, when the computer's own language decides.
+	Language string `json:"language,omitempty"`
+	English  bool   `json:"english"`
+	// Seeded says the pieces that come with the program have been put in the library once.
+	Seeded bool    `json:"seeded"`
+	Tuning string  `json:"tuning"`
+	Bass   float64 `json:"bass"` // volume of the bass, 0 to 1.5
+	Rest   float64 `json:"rest"` // volume of everything else, 0 to 1
 }
 
 // Game is the whole program, as the window library wants it.
@@ -77,6 +83,15 @@ func Run(version string) error {
 	}
 	g := &Game{version: version, lib: lib, settings: settings{Tuning: "4", Bass: 1, Rest: 1}, scale: 1}
 	g.loadSettings()
+	if g.settings.Language == "" {
+		g.settings.English = systemLanguage() != "it"
+	}
+	if !g.settings.Seeded && os.Getenv("CBASS_NO_SEED") == "" {
+		if _, err := demo.Install(lib); err == nil {
+			g.settings.Seeded = true
+			g.saveSettings()
+		}
+	}
 	g.entries = lib.List()
 	g.shot = os.Getenv("CBASS_SHOT")
 	g.shotAt, _ = strconv.ParseFloat(os.Getenv("CBASS_SHOT_AT"), 64)
@@ -124,6 +139,26 @@ func (g *Game) saveSettings() {
 		os.MkdirAll(filepath.Dir(path), 0o755)
 		os.WriteFile(path, data, 0o644)
 	}
+}
+
+// switchLanguage goes from one language to the other, and remembers the choice.
+func (g *Game) switchLanguage() {
+	g.settings.English = !g.settings.English
+	g.settings.Language = map[bool]string{true: "en", false: "it"}[g.settings.English]
+	g.saveSettings()
+}
+
+// titleOf is how a recording is named: its title, and its key when it has one.
+func (g *Game) titleOf(title, key string) string {
+	if key == "" {
+		return title
+	}
+	for midi := 0; midi < 12; midi++ {
+		if fretboard.PitchName(midi) == key {
+			return title + " " + g.t("in", "in") + " " + g.noteName(midi)
+		}
+	}
+	return title
 }
 
 // t picks the Italian or the English of a text.
@@ -546,7 +581,7 @@ func (g *Game) button(c *canvas, id string, r rect, text string, l look) bool {
 		case primary:
 			back, ink = colAccent, colOnLight
 		case chosen:
-			back, ink = fade(colAccent, 0.22), colAccent
+			back, ink = fade(colAccent2, 0.2), colAccent2
 		case quiet:
 			back, ink = colBack, colDim
 		case danger:
@@ -557,7 +592,7 @@ func (g *Game) button(c *canvas, id string, r rect, text string, l look) bool {
 		}
 		c.round(r, 8, back)
 		if l == chosen {
-			c.outline(r, 8, 1, fade(colAccent, 0.7))
+			c.outline(r, 8, 1, fade(colAccent2, 0.7))
 		}
 		if g.active == id {
 			c.round(r, 8, fade(rgb(0, 0, 0), 0.18))

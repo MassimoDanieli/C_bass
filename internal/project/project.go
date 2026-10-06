@@ -24,6 +24,10 @@ type Project struct {
 	Events   []transcribe.Event `json:"events"`
 	// Reader is the version of the note reader that wrote Events: see Reader.
 	Reader int `json:"reader,omitempty"`
+	// Key of the piece as a pitch name, when it is known: the pieces that come with the program have one.
+	Key string `json:"key,omitempty"`
+	// BuiltIn marks a piece that came with the program.
+	BuiltIn bool `json:"builtIn,omitempty"`
 }
 
 // Reader is the current version of the note reader. A project written by an older one is
