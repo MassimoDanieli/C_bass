@@ -24,7 +24,7 @@ func (g *Game) homeScreen(c *canvas) {
 	c.round(drop, 16, colPanel)
 	c.outline(drop.inset(0.5), 16, 1, colLine)
 	c.label(g.t("Trascina qui un brano", "Drop a recording here"), g.w/2, drop.y+52, 22, medium, colText, centre)
-	c.label(g.t("MP3 o WAV. La prima volta serve circa un minuto: poi si riapre subito.", "MP3 or WAV. The first time takes about a minute; after that it opens at once."), g.w/2, drop.y+84, 14, regular, colDim, centre)
+	c.label(g.t("MP3, WAV, FLAC o M4A. La prima volta serve circa un minuto: poi si riapre subito.", "MP3, WAV, FLAC or M4A. The first time takes about a minute; after that it opens at once."), g.w/2, drop.y+84, 14, regular, colDim, centre)
 	if g.button(c, "choose", rect{g.w/2 - 90, drop.y + 110, 180, 38}, g.t("Scegli un file…", "Choose a file…"), primary) {
 		g.askForFile()
 	}
@@ -117,8 +117,10 @@ func (g *Game) workingScreen(c *canvas) {
 		switch {
 		case strings.Contains(message, "downloading"):
 			headline = g.t("Non riesco a scaricare il modello: controlla la connessione e riprova.", "The model could not be downloaded: check the connection and try again.")
-		case strings.Contains(message, "only WAV and MP3"), strings.HasPrefix(message, "mp3:"), strings.HasPrefix(message, "wav:"):
-			headline = g.t("Non riesco a leggere questo file: servono MP3 o WAV.", "This file cannot be read: MP3 or WAV are needed.")
+		case strings.Contains(message, "ffmpeg"):
+			headline = g.t("Per questo tipo di file serve ffmpeg: con MP3, WAV e FLAC non serve altro.", "This kind of file needs ffmpeg: MP3, WAV and FLAC need nothing else.")
+		case strings.Contains(message, "can be read"), strings.HasPrefix(message, "mp3:"), strings.HasPrefix(message, "wav:"), strings.HasPrefix(message, "flac:"):
+			headline = g.t("Non riesco a leggere questo file audio.", "This audio file cannot be read.")
 		case strings.Contains(message, "no notes were found"):
 			headline = g.t("In questo brano non ho trovato note di basso.", "No bass notes were found in this recording.")
 		}
@@ -187,4 +189,7 @@ func (g *Game) workingScreen(c *canvas) {
 		row += 36
 	}
 	c.label(g.t("Puoi lasciare la finestra aperta e fare altro.", "You can leave the window open and do something else."), x, row+16, 13, regular, colFaint, left)
+	if g.button(c, "give-up", rect{x, row + 44, 140, 38}, g.t("Annulla", "Cancel"), plain) || (c.in != nil && g.pressed(ebiten.KeyEscape)) {
+		g.goHome()
+	}
 }

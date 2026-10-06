@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -45,6 +46,11 @@ type settings struct {
 	Tuning string  `json:"tuning"`
 	Bass   float64 `json:"bass"` // volume of the bass, 0 to 1.5
 	Rest   float64 `json:"rest"` // volume of everything else, 0 to 1
+	// the helps for practising, and where on the neck the part is fingered
+	CountIn   bool `json:"countIn"`
+	Metronome bool `json:"metronome"`
+	Quicken   bool `json:"quicken"`
+	Low       bool `json:"lowPosition"`
 }
 
 // Game is the whole program, as the window library wants it.
@@ -65,6 +71,11 @@ type Game struct {
 	scroll  float32
 	notice  string
 	noticed time.Time
+	good    bool // the notice is good news, not a complaint
+	menu    bool // the list of ways to save the part is open
+	awake   int  // frames still to paint: an idle window is left as it is
+	frames  int
+	seen    [4]float32
 	choose  chan string // the answer of the file dialog
 
 	scale float32
@@ -106,8 +117,11 @@ func Run(version string) error {
 		}
 	}
 	ebiten.SetWindowTitle("C_bass")
-	ebiten.SetWindowSize(1180, 780)
-	ebiten.SetWindowSizeLimits(900, 640, -1, -1)
+	width, height := 1180, 820
+	fmt.Sscanf(os.Getenv("CBASS_SIZE"), "%dx%d", &width, &height) // for trying other sizes
+	ebiten.SetWindowSize(width, height)
+	ebiten.SetScreenClearedEveryFrame(false)
+	ebiten.SetWindowSizeLimits(1040, 740, -1, -1)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetRunnableOnUnfocused(true)
 	ebiten.SetWindowIcon([]image.Image{icon.Draw(64, 0), icon.Draw(128, 0), icon.Draw(256, 0)})
@@ -169,8 +183,40 @@ func (g *Game) t(italian, english string) string {
 	return italian
 }
 
+// say shows a complaint at the foot of the window for a few seconds.
 func (g *Game) say(message string) {
-	g.notice, g.noticed = message, time.Now()
+	g.notice, g.noticed, g.good = message, time.Now(), false
+}
+
+// tell shows good news the same way.
+func (g *Game) tell(message string) {
+	g.notice, g.noticed, g.good = message, time.Now(), true
+}
+
+// showing says whether a notice is on the screen.
+func (g *Game) showing() bool {
+	return g.notice != "" && time.Since(g.noticed) <= noticeTime
+}
+
+const noticeTime = 7 * time.Second
+
+// stir says whether anything on the screen may have changed, so that it needs painting
+// again: a window nobody is touching, with nothing playing, costs nothing.
+func (g *Game) stir(x, y, wheel float32) bool {
+	now := [4]float32{x, y, g.w, g.h}
+	moved := now != g.seen
+	g.seen = now
+	switch {
+	case moved, wheel != 0, len(g.keys) > 0, g.in.pressed, g.in.released, g.in.down:
+		return true
+	case g.shot != "", g.job != nil, g.choose != nil:
+		return true
+	case g.notice != "" && time.Since(g.noticed) <= noticeTime+time.Second:
+		return true
+	case g.song != nil && (g.song.player.Playing() || g.song.player.Counting()):
+		return true
+	}
+	return false
 }
 
 // Layout makes the screen as large as the window in real pixels, so that a Retina display
@@ -197,6 +243,12 @@ func (g *Game) Update() error {
 		down:     ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft),
 	}
 	g.keys = inpututil.AppendJustPressedKeys(g.keys[:0])
+	g.frames++
+	if g.stir(x, y, float32(wheel)) || ebiten.DroppedFiles() != nil {
+		g.awake = 20
+	} else if g.frames%60 == 0 && g.awake == 0 {
+		g.awake = 1 // once a second anyway, in case the system threw the picture away
+	}
 
 	g.takeDrop()
 	g.takeChoice()
@@ -212,6 +264,10 @@ func (g *Game) Update() error {
 
 // Draw paints the window.
 func (g *Game) Draw(target *ebiten.Image) {
+	if g.awake <= 0 {
+		return
+	}
+	g.awake--
 	x, y := g.mouse()
 	c := &canvas{dst: target, mx: x, my: y, scale: g.scale, w: g.w, h: g.h}
 	c.fill(rect{0, 0, g.w, g.h}, colBack)
@@ -244,13 +300,17 @@ func (g *Game) pressed(key ebiten.Key) bool {
 }
 
 func (g *Game) drawNotice(c *canvas) {
-	if g.notice == "" || time.Since(g.noticed) > 7*time.Second {
+	if !g.showing() {
 		return
+	}
+	edge := colDanger
+	if g.good {
+		edge = colAccent2
 	}
 	width := min(c.width(g.notice, 14, regular)+40, g.w-40)
 	box := rect{(g.w - width) / 2, g.h - 62, width, 40}
 	c.round(box, 10, colRaised)
-	c.outline(box, 10, 1, colDanger)
+	c.outline(box, 10, 1, edge)
 	c.label(c.fit(g.notice, 14, regular, width-30), g.w/2, box.y+20, 14, regular, colText, centre)
 }
 
@@ -276,10 +336,33 @@ func (g *Game) takeShot(target *ebiten.Image) {
 				g.song.retune("6")
 			case "play":
 				g.song.player.SetPlaying(true)
+			case "note":
+				if i := g.song.coming(g.shotAt); i >= 0 {
+					g.song.chosen = g.song.project.Events[i].ID
+				}
+			case "chord":
+				for i, chord := range g.song.project.Chords {
+					if g.shotAt >= chord.Start && g.shotAt < chord.End {
+						g.song.chord = i
+					}
+				}
+			case "odd":
+				g.song.setBeats(g.song.bar(g.shotAt)+1, 2)
+			case "menu":
+				g.menu = true
+			case "export":
+				for _, kind := range []string{"text", "musicxml", "pdf"} {
+					g.export(g.song, kind)
+				}
+			case "low":
+				g.song.project.Low = true
+				g.song.retune(g.song.project.Tuning)
+			case "helps":
+				g.settings.CountIn, g.settings.Metronome, g.settings.Quicken = true, true, true
 			}
 		}
 	}
-	if os.Getenv("CBASS_SHOT_DO") == "english" {
+	if strings.Contains(os.Getenv("CBASS_SHOT_DO"), "english") {
 		g.settings.English = true
 	}
 	if g.shotFrames < 20 {
@@ -299,14 +382,6 @@ func (g *Game) takeShot(target *ebiten.Image) {
 
 // ---- opening a recording ----
 
-func playable(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".mp3", ".wav", ".wave":
-		return true
-	}
-	return false
-}
-
 // takeDrop opens a recording dropped on the window.
 func (g *Game) takeDrop() {
 	dropped := ebiten.DroppedFiles()
@@ -321,7 +396,7 @@ func (g *Game) takeDrop() {
 		return
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || !playable(entry.Name()) {
+		if entry.IsDir() || !audio.Readable(entry.Name()) {
 			continue
 		}
 		data, err := fs.ReadFile(dropped, entry.Name())
@@ -332,7 +407,7 @@ func (g *Game) takeDrop() {
 		g.open(entry.Name(), data)
 		return
 	}
-	g.say(g.t("Servono file MP3 o WAV.", "Only MP3 and WAV files can be opened."))
+	g.say(g.t("Servono file audio: MP3, WAV, FLAC, M4A.", "An audio file is needed: MP3, WAV, FLAC, M4A."))
 }
 
 func (g *Game) askForFile() {
@@ -373,7 +448,7 @@ func (g *Game) open(name string, data []byte) {
 	title := strings.TrimSuffix(name, filepath.Ext(name))
 	j := &job{title: title, started: time.Now()}
 	g.startJob(j)
-	tuning := g.settings.Tuning
+	tuning, low := g.settings.Tuning, g.settings.Low
 	go j.run(func() (*song, error) {
 		id := library.ID(data)
 		if g.lib.Has(id) {
@@ -386,7 +461,7 @@ func (g *Game) open(name string, data []byte) {
 		}
 		mix := project.Prepare(recording)
 		data = nil
-		result, err := project.Analyse(mix, title, project.Options{Version: g.version, Tuning: tuning}, func(step project.Step) {
+		result, err := project.Analyse(mix, title, project.Options{Version: g.version, Tuning: tuning, Low: low, Stop: j.stop.Load}, func(step project.Step) {
 			switch step.Stage {
 			case project.Downloading:
 				j.at(stageDownloading, step.Detail, step.Done, step.Total)
@@ -402,6 +477,9 @@ func (g *Game) open(name string, data []byte) {
 		})
 		if err != nil {
 			return nil, err
+		}
+		if j.stop.Load() { // given up while the notes were being read: nothing is kept
+			return nil, project.ErrStopped
 		}
 		j.at(stageSaving, "", 0, 0)
 		if err := g.lib.Save(id, result); err != nil {
@@ -475,13 +553,18 @@ func (g *Game) takeJob() {
 		g.lib.SaveProject(s.id, s.project)
 	}
 	s.player.SetGains(g.settings.Bass, g.settings.Rest)
+	s.player.SetMetronome(g.settings.Metronome)
+	g.applyQuicken(s)
 	g.entries = g.lib.List()
-	g.screen = playing
+	g.screen, g.menu = playing, false
 }
 
 func (g *Game) goHome() {
 	g.closeSong()
-	g.job = nil
+	if g.job != nil {
+		g.job.stop.Store(true) // whatever it was doing, nobody is waiting for it any more
+	}
+	g.job, g.menu = nil, false
 	g.entries = g.lib.List()
 	g.screen = home
 }
@@ -512,6 +595,7 @@ type job struct {
 	downloaded  bool
 	err         error
 	song        *song
+	stop        atomic.Bool // set to give the work up
 }
 
 func (j *job) at(s stage, detail string, done, total int64) {
@@ -534,6 +618,10 @@ func (j *job) run(work func() (*song, error)) {
 		}()
 		s, err = work()
 	}()
+	if s != nil && j.stop.Load() { // finished after it was given up: nobody will play it
+		s.player.Close()
+		return
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.song, j.err = s, err

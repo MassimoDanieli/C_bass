@@ -30,8 +30,9 @@ var Qualities = []string{"", "m", "7", "m7", "maj7"}
 
 var shapes = map[string][]int{"": {0, 4, 7}, "m": {0, 3, 7}, "7": {0, 4, 7, 10}, "m7": {0, 3, 7, 10}, "maj7": {0, 4, 7, 11}}
 
-var names = [...]string{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
-var latin = [...]string{"Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si"}
+// Chords are named the way they are met on a chart: Bb, Eb and Ab rather than A#, D# and G#.
+var names = [...]string{"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}
+var latin = [...]string{"Do", "Do#", "Re", "Mib", "Mi", "Fa", "Fa#", "Sol", "Lab", "La", "Sib", "Si"}
 
 // Name writes the chord out: A7, Dm7; or in the Latin way: La7, Rem7.
 func (c Chord) Name(inLatin bool) string {

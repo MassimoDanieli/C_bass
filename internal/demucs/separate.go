@@ -43,7 +43,7 @@ var ErrStopped = errors.New("stopped")
 type Separator struct {
 	// Stop, if set, is asked before every pass whether to give up: a separation takes a
 	// minute or more, and whoever started it may think better of it.
-	Stop func() bool
+	Stop    func() bool
 	session *ort.DynamicAdvancedSession
 	inputs  []string
 	outputs []string

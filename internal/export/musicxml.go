@@ -97,6 +97,8 @@ var steps = [...]struct {
 	alter int
 }{{"C", 0}, {"C", 1}, {"D", 0}, {"D", 1}, {"E", 0}, {"F", 0}, {"F", 1}, {"G", 0}, {"G", 1}, {"A", 0}, {"A", 1}, {"B", 0}}
 
+var flats = map[int]string{3: "E", 8: "A", 10: "B"}
+
 var kinds = map[string]string{"": "major", "m": "minor", "7": "dominant", "m7": "minor-seventh", "maj7": "major-seventh"}
 
 func escape(s string) string {
@@ -154,6 +156,9 @@ func MusicXML(p *project.Project) []byte {
 		}
 		for _, c := range bar.chords {
 			root := steps[((c.chord.Root%12)+12)%12]
+			if flat, ok := flats[((c.chord.Root%12)+12)%12]; ok { // chords are written Bb, Eb, Ab
+				root.step, root.alter = flat, -1
+			}
 			alter := ""
 			if root.alter != 0 {
 				alter = fmt.Sprintf("<root-alter>%d</root-alter>", root.alter)
