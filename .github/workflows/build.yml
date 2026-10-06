@@ -129,13 +129,7 @@ jobs:
           CBASS_SHOT: window.png
         run: |
           go run ./tools/demosong
-          program=./C_bass.exe
-          if [ "$RUNNER_OS" = macOS ]; then
-            program=C_bass.app/Contents/MacOS/C_bass
-            # The build machine is a virtual Mac that hands Metal no surface to draw on, so here
-            # the window is drawn with OpenGL. On a real Mac it uses Metal.
-            export EBITENGINE_GRAPHICS_LIBRARY=opengl
-          fi
+          if [ "$RUNNER_OS" = macOS ]; then program=C_bass.app/Contents/MacOS/C_bass; else program=./C_bass.exe; fi
           "$program" > window.log 2>&1 &
           pid=$!
           for i in $(seq 1 90); do
