@@ -130,15 +130,22 @@ jobs:
         run: |
           go run ./tools/demosong
           if [ "$RUNNER_OS" = macOS ]; then program=C_bass.app/Contents/MacOS/C_bass; else program=./C_bass.exe; fi
-          "$program" &
+          "$program" > window.log 2>&1 &
           pid=$!
           for i in $(seq 1 90); do
             if ! kill -0 $pid 2>/dev/null; then break; fi
             sleep 1
           done
-          if kill -0 $pid 2>/dev/null; then kill $pid; echo "the window never drew"; exit 1; fi
-          wait $pid
-          test -s window.png
+          said() { tr '\n' ' ' < window.log | cut -c 1-900; }
+          if kill -0 $pid 2>/dev/null; then
+            kill $pid
+            echo "::error title=${{ matrix.app }}::the window never drew: $(said)"
+            exit 1
+          fi
+          if ! wait $pid || ! test -s window.png; then
+            echo "::error title=${{ matrix.app }}::the window did not open: $(said)"
+            exit 1
+          fi
       - name: Pack the application (macOS)
         if: runner.os == 'macOS'
         run: ditto -c -k --keepParent C_bass.app C_bass-macos-arm64.zip
