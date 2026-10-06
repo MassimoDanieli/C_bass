@@ -42,7 +42,9 @@ type settings struct {
 	Language string `json:"language,omitempty"`
 	English  bool   `json:"english"`
 	// Seeded says the pieces that come with the program have been put in the library once.
-	Seeded bool    `json:"seeded"`
+	Seeded bool `json:"seeded"`
+	// Sound is the version of the instruments those pieces were last played with.
+	Sound  int     `json:"sound"`
 	Tuning string  `json:"tuning"`
 	Bass   float64 `json:"bass"` // volume of the bass, 0 to 1.5
 	Rest   float64 `json:"rest"` // volume of everything else, 0 to 1
@@ -99,7 +101,13 @@ func Run(version string) error {
 	}
 	if !g.settings.Seeded && os.Getenv("CBASS_NO_SEED") == "" {
 		if _, err := demo.Install(lib); err == nil {
-			g.settings.Seeded = true
+			g.settings.Seeded, g.settings.Sound = true, demo.Sound
+			g.saveSettings()
+		}
+	} else if g.settings.Seeded && g.settings.Sound < demo.Sound && os.Getenv("CBASS_NO_SEED") == "" {
+		// the instruments have been made better since: the pieces are played again
+		if err := demo.Refresh(lib); err == nil {
+			g.settings.Sound = demo.Sound
 			g.saveSettings()
 		}
 	}

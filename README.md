@@ -111,7 +111,7 @@ Legge MP3 e WAV.
 | `internal/project` | tutto il percorso, dal brano alla parte: lo usano riga di comando e finestra |
 | `internal/library` | i brani già analizzati |
 | `internal/player` | riproduzione: due tracce, velocità variabile a intonazione ferma (WSOLA), ripetizione, metronomo e conto iniziale |
-| `internal/demo` | i cinque brani inclusi: scritti in codice, suonati da un sintetizzatore a corda pizzicata |
+| `internal/demo` | i cinque brani inclusi: scritti in codice, suonati da strumenti fatti in codice (basso elettrico, batteria, organo, piano elettrico, chitarra classica) |
 | `internal/app` | la finestra ([Ebitengine](https://ebitengine.org)) |
 | `cmd/cbass`, `cmd/cbass-app` | la riga di comando e l'applicazione |
 

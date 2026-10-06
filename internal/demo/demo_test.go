@@ -64,3 +64,38 @@ func TestInstallIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// When the instruments change, the pieces in a library are played again; a part corrected by
+// hand is kept, and a piece taken out of the list stays out.
+func TestRefreshKeepsThePart(t *testing.T) {
+	lib := &library.Library{Dir: t.TempDir()}
+	if _, err := Install(lib); err != nil {
+		t.Fatal(err)
+	}
+	kept, gone := Pieces[0].ID, Pieces[1].ID
+	r, err := lib.Load(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Project.Events[0].Midi += 2
+	want := r.Project.Events[0].Midi
+	if err := lib.SaveProject(kept, r.Project); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := Refresh(lib); err != nil {
+		t.Fatal(err)
+	}
+	if lib.Has(gone) {
+		t.Error("a piece taken out came back")
+	}
+	again, err := lib.Load(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Project.Events[0].Midi != want || again.Bass.Len() != r.Bass.Len() {
+		t.Error("the corrected part was not kept as it was")
+	}
+}
