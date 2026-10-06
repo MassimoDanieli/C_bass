@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/MassimoDanieli/c_bass/internal/chords"
 	"math"
 	"os"
 	"testing"
@@ -137,5 +138,94 @@ func TestMovingTheBarLines(t *testing.T) {
 	s.shiftBars(-1)
 	if s.pulse.Downbeat != 3 {
 		t.Fatalf("a beat back from the first is the last: got %d", s.pulse.Downbeat)
+	}
+}
+
+func TestCorrectingANote(t *testing.T) {
+	s := testSong(t)
+	id := s.project.Events[1].ID // the A1 on the second beat, open A string
+	s.transpose(s.find(id), 3)   // up to C2
+	if e := s.project.Events[s.find(id)]; e.Midi != 36 || e.String != 1 || e.Fret != 3 || !e.Edited || !e.Locked {
+		t.Fatalf("up three semitones: %+v", e)
+	}
+	s.restring(s.find(id), -1) // the same C2 on the E string
+	if e := s.project.Events[s.find(id)]; e.String != 0 || e.Fret != 8 {
+		t.Fatalf("on the string below: string %d fret %d", e.String, e.Fret)
+	}
+	s.restring(s.find(id), -1) // there is no string below the lowest
+	if e := s.project.Events[s.find(id)]; e.String != 0 {
+		t.Fatalf("moved off the neck: string %d", e.String)
+	}
+	s.transpose(s.find(id), -20) // below the instrument: refused
+	if e := s.project.Events[s.find(id)]; e.Midi != 36 {
+		t.Fatalf("transposed off the instrument: %d", e.Midi)
+	}
+
+	// a quarter shortened: a dotted eighth and a sixteenth of rest is not how it would be
+	// written, so it becomes an eighth
+	s.resize(s.find(id), -1)
+	if _, slots := s.slotOf(s.find(id)); slots != 2 {
+		t.Fatalf("shortened to %d sixteenths", slots)
+	}
+	s.resize(s.find(id), 9) // it cannot run into the next note
+	if e, next := s.project.Events[s.find(id)], s.project.Events[s.find(id)+1]; e.End > next.Start+1e-9 {
+		t.Fatalf("runs into the next note: ends %.3f, next starts %.3f", e.End, next.Start)
+	}
+	s.move(s.find(id), 1) // a sixteenth later
+	if slot, _ := s.slotOf(s.find(id)); slot != 5 {
+		t.Fatalf("moved to sixteenth %d", slot)
+	}
+	s.move(s.find(id), 5) // past the next note: refused
+	if slot, _ := s.slotOf(s.find(id)); slot != 5 {
+		t.Fatalf("jumped over the next note to sixteenth %d", slot)
+	}
+
+	count := len(s.project.Events)
+	s.remove(s.find(id))
+	if len(s.project.Events) != count-1 || s.find(id) != -1 {
+		t.Fatal("the note is still there")
+	}
+	added := s.add(0.5) // back on the second beat
+	if i := s.find(added); i != 1 || s.project.Events[i].Midi != 33 || len(s.project.Events) != count {
+		t.Fatalf("added at %d: %+v", i, s.project.Events)
+	}
+	if s.add(0.5) != "" {
+		t.Fatal("a second note was written on the same sixteenth")
+	}
+	// every change can be taken back, one by one, to the part as it was read
+	for s.undo() {
+	}
+	if e := s.project.Events[1]; len(s.project.Events) != count || e.Midi != 33 || e.Edited || e.ID != id {
+		t.Fatalf("after undoing everything: %+v", e)
+	}
+}
+
+func TestCorrectingChordsAndBars(t *testing.T) {
+	s := testSong(t)
+	s.project.Chords = []chords.Chord{{Start: 0, End: 4, Root: 9, Quality: "m"}}
+	i := s.chordAdd(2.2) // on the beat at 2 s, the first of bar 2: the chord splits there
+	if i != 1 || len(s.project.Chords) != 2 || s.project.Chords[0].End != 2 || s.project.Chords[1].End != 4 || s.project.Chords[1].Root != 9 {
+		t.Fatalf("split: %+v", s.project.Chords)
+	}
+	if s.chordAdd(2.3) != -1 {
+		t.Fatal("two chords on one beat")
+	}
+	s.chordRoot(1, 5)
+	s.chordKind(1) // minor -> seventh
+	if c := s.project.Chords[1]; c.Root != 2 || c.Quality != "7" || !c.Edited {
+		t.Fatalf("changed to %+v", c)
+	}
+	s.chordRemove(1)
+	if len(s.project.Chords) != 1 || s.project.Chords[0].End != 4 {
+		t.Fatalf("after removing: %+v", s.project.Chords)
+	}
+
+	s.setBeats(1, 2) // bar 2 has two beats: bar 3 starts at 3 s instead of 4
+	if got := s.barStart(2); math.Abs(got-3) > 1e-6 {
+		t.Fatalf("bar 3 starts at %.2f", got)
+	}
+	s.undo()
+	if got := s.barStart(2); math.Abs(got-4) > 1e-6 {
+		t.Fatalf("after undoing, bar 3 starts at %.2f", got)
 	}
 }

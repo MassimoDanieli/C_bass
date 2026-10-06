@@ -107,8 +107,29 @@ func transitionCost(previous, current position, previousEvent, currentEvent tran
 // Finger chooses a string and a fret for every note, as one path through the whole line that
 // keeps the hand from jumping about. Positions the player has locked are kept.
 func Finger(events []transcribe.Event, tuning Tuning, maxFret int) []transcribe.Event {
+	return FingerWith(events, tuning, maxFret, false)
+}
+
+// firstPosition is the highest fret reached without moving the hand from the nut.
+const firstPosition = 4
+
+// FingerWith is Finger with a say in where on the neck: low keeps the line near the nut, on
+// open strings and the first four frets, going higher only where a note is not to be found
+// there. Without it the line settles wherever the hand moves least, often around the
+// seventh fret.
+func FingerWith(events []transcribe.Event, tuning Tuning, maxFret int, low bool) []transcribe.Event {
 	if len(events) == 0 {
 		return nil
+	}
+	height := func(pos position) float64 {
+		if !low || pos.str < 0 || pos.locked {
+			return 0
+		}
+		if pos.fret <= firstPosition {
+			return float64(pos.fret) * 0.25
+		}
+		// leaving first position costs more than any crossing of strings inside it
+		return 8 + float64(pos.fret-firstPosition)*1.5
 	}
 	layers := make([][]position, len(events))
 	costs := make([][]float64, len(events))
@@ -128,12 +149,12 @@ func Finger(events []transcribe.Event, tuning Tuning, maxFret int) []transcribe.
 				if pos.str < 0 {
 					costs[i][c] = 40
 				} else {
-					costs[i][c] = float64(pos.fret)*0.11 + float64(pos.str)*0.06 - bonus
+					costs[i][c] = float64(pos.fret)*0.11 + float64(pos.str)*0.06 - bonus + height(pos)
 				}
 				continue
 			}
 			for p, previous := range layers[i-1] {
-				if value := costs[i-1][p] + transitionCost(previous, pos, events[i-1], event) - bonus; value < costs[i][c] {
+				if value := costs[i-1][p] + transitionCost(previous, pos, events[i-1], event) - bonus + height(pos); value < costs[i][c] {
 					costs[i][c] = value
 					back[i][c] = p
 				}

@@ -231,3 +231,151 @@ func TestSlowedDownEachNoteIsStruckOnce(t *testing.T) {
 		}
 	}
 }
+
+// loudest returns the offset of the loudest sample of a stretch.
+func loudest(signal []float32) (int, float32) {
+	at, peak := 0, float32(0)
+	for i, v := range signal {
+		if v < 0 {
+			v = -v
+		}
+		if v > peak {
+			at, peak = i, v
+		}
+	}
+	return at, peak
+}
+
+// taps is a recording with a short tap on each of the beats given.
+func taps(seconds float64, beats []float64) *audio.Buffer {
+	out := silence(seconds)
+	for _, beat := range beats {
+		start := int(beat * Rate)
+		for i := 0; i < Rate*3/100; i++ {
+			t := float64(i) / Rate
+			v := float32(0.4 * math.Exp(-t*120) * math.Sin(2*math.Pi*300*t))
+			out.Channels[0][start+i], out.Channels[1][start+i] = v, v
+		}
+	}
+	return out
+}
+
+// starts returns where the sound comes back after a silence, in frames.
+func starts(signal []float32, threshold float32) []int {
+	var out []int
+	quiet := 0
+	for i, v := range signal {
+		if v < 0 {
+			v = -v
+		}
+		if v > threshold {
+			if quiet > Rate/20 || len(out) == 0 && quiet == i {
+				out = append(out, i)
+			}
+			quiet = 0
+		} else {
+			quiet++
+		}
+	}
+	return out
+}
+
+// The metronome clicks with the beats of the recording as they are heard: slowed down, the
+// recording does not run evenly from piece to piece, and a click placed by the clock would
+// part from the drum it belongs to.
+func TestTheMetronomeClicksWithTheRecording(t *testing.T) {
+	beats := []float64{0.5, 1, 1.5, 2, 2.5, 3, 3.5}
+	strong := []bool{true, false, false, false, true, false, false}
+	for _, speed := range []float64{1, 0.8, 0.5, 1.2} {
+		play := func(metronome bool) []float32 {
+			e := NewEngine(taps(5, beats), silence(5))
+			e.SetBeats(beats, strong)
+			e.SetMetronome(metronome)
+			e.SetSpeed(speed)
+			e.SetPlaying(true)
+			return pull(e, int(4.5/speed*Rate))
+		}
+		without, with := play(false), play(true)
+		clicks := make([]float32, len(with))
+		for i := range with {
+			clicks[i] = with[i] - without[i] // what the metronome added
+		}
+		heard, clicked := starts(without, 0.05), starts(clicks, 0.05)
+		if len(heard) != len(beats) || len(clicked) != len(beats) {
+			t.Fatalf("at %.0f%%: %d taps heard, %d clicks, for %d beats", speed*100, len(heard), len(clicked), len(beats))
+		}
+		for i := range beats {
+			if off := clicked[i] - heard[i]; off < -Rate/200 || off > Rate/200 {
+				t.Errorf("at %.0f%% the click of beat %d is %d ms from its tap", speed*100, i+1, off*1000/Rate)
+			}
+		}
+	}
+	// turned off, it stops
+	e := NewEngine(silence(3), silence(3))
+	e.SetBeats(beats, strong)
+	e.SetMetronome(true)
+	e.SetPlaying(true)
+	pull(e, Rate/4)
+	e.SetMetronome(false)
+	if _, peak := loudest(pull(e, 2*Rate)[Rate/10:]); peak > 0.01 {
+		t.Error("the metronome goes on after being turned off")
+	}
+}
+
+// Counted in, the recording waits for the clicks and then starts from where it was.
+func TestTheCountComesBeforeTheRecording(t *testing.T) {
+	e := NewEngine(tone(8, 110, 0.3), silence(8))
+	e.Seek(2)
+	e.PlayCounted(4, 0.5)
+	if !e.Counting() {
+		t.Fatal("no count under way")
+	}
+	out := pull(e, 2*Rate-hop)
+	for click := 0; click < 4; click++ {
+		if _, peak := loudest(out[click*Rate/2 : click*Rate/2+Rate/10]); peak < 0.15 {
+			t.Errorf("click %d of the count is missing", click+1)
+		}
+	}
+	if _, peak := loudest(out[Rate/4 : Rate/2-Rate/20]); peak > 0.01 {
+		t.Error("the recording sounds during the count")
+	}
+	if at := e.Target(); math.Abs(at-2) > 1e-6 {
+		t.Fatalf("the recording moved to %.2f during the count", at)
+	}
+	pull(e, Rate)
+	if e.Counting() {
+		t.Fatal("still counting after four clicks")
+	}
+	if at := e.Target(); at < 2.7 || at > 3.1 {
+		t.Fatalf("a second after the count the recording is at %.2f", at)
+	}
+	// stopping during a count drops it
+	e.SetPlaying(false)
+	e.PlayCounted(4, 0.5)
+	pull(e, Rate/2)
+	e.SetPlaying(false)
+	if e.Counting() {
+		t.Fatal("the count survived a stop")
+	}
+	if _, peak := loudest(pull(e, 2*Rate)[Rate/2:]); peak > 0.01 {
+		t.Error("clicks go on after a stop")
+	}
+}
+
+// A stretch repeated goes faster every time round, up to the speed asked and no further.
+func TestARepeatedStretchQuickens(t *testing.T) {
+	e := NewEngine(tone(10, 110, 0.3), silence(10))
+	e.SetLoop(2, 3, true)
+	e.Seek(2)
+	e.SetSpeed(0.6)
+	e.SetQuicken(0.1, 0.9)
+	e.SetPlaying(true)
+	pull(e, 2*Rate) // once round at 60% takes 1.7 s
+	if got := e.Speed(); math.Abs(got-0.7) > 1e-9 {
+		t.Fatalf("after once round the speed is %.2f", got)
+	}
+	pull(e, 12*Rate)
+	if got := e.Speed(); math.Abs(got-0.9) > 1e-9 {
+		t.Fatalf("after many times round the speed is %.2f, not the 0.90 asked", got)
+	}
+}

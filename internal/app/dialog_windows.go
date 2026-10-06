@@ -12,7 +12,7 @@ func chooseFile(prompt string) string {
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $d = New-Object System.Windows.Forms.OpenFileDialog
 $d.Title = '` + strings.ReplaceAll(prompt, "'", "") + `'
-$d.Filter = 'MP3, WAV|*.mp3;*.wav'
+$d.Filter = 'Audio|*.mp3;*.wav;*.flac;*.m4a;*.aac;*.ogg;*.opus;*.aif;*.aiff'
 if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }`
 	command := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}

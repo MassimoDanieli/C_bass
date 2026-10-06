@@ -2,6 +2,8 @@ package audio
 
 import (
 	"math"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -61,5 +63,54 @@ func TestStereoAndMono(t *testing.T) {
 	both := &Buffer{SampleRate: 8000, Channels: [][]float32{{1, 0}, {0, 1}}}
 	if m := both.Mono(); m[0] != 0.5 || m[1] != 0.5 {
 		t.Fatalf("mono mix is %v", m)
+	}
+}
+
+// A FLAC file and, where ffmpeg is at hand, an M4A: both made here from a tone, both read back.
+func TestOtherKindsOfFile(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to make the files with")
+	}
+	dir := t.TempDir()
+	tone := &Buffer{SampleRate: 44100, Channels: [][]float32{make([]float32, 44100), make([]float32, 44100)}}
+	for i := range tone.Channels[0] {
+		v := float32(0.5 * math.Sin(2*math.Pi*220*float64(i)/44100))
+		tone.Channels[0][i], tone.Channels[1][i] = v, v
+	}
+	wav := filepath.Join(dir, "tone.wav")
+	if err := WriteWAV(wav, tone); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"tone.flac", "tone.m4a", "tone.ogg"} {
+		path := filepath.Join(dir, name)
+		if out, err := exec.Command(ffmpeg, "-v", "error", "-y", "-i", wav, path).CombinedOutput(); err != nil {
+			t.Logf("ffmpeg cannot make %s here: %s", name, out)
+			continue
+		}
+		// under another name, so that it is told by its content
+		disguised := filepath.Join(dir, name+".bin")
+		os.Rename(path, disguised)
+		got, err := Decode(disguised)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if got.SampleRate != 44100 || got.Len() < 43000 || got.Len() > 47000 {
+			t.Errorf("%s: %d frames at %d Hz", name, got.Len(), got.SampleRate)
+			continue
+		}
+		crossings := 0
+		for i := 4410; i < 39690; i++ {
+			if got.Channels[0][i-1] < 0 && got.Channels[0][i] >= 0 {
+				crossings++
+			}
+		}
+		if hz := float64(crossings) / 0.8; math.Abs(hz-220) > 4 {
+			t.Errorf("%s: the tone of 220 Hz came back as %.0f Hz", name, hz)
+		}
+	}
+	if !Readable("Song.FLAC") || !Readable("a.m4a") || Readable("notes.txt") {
+		t.Error("the endings that can be read are not told right")
 	}
 }

@@ -9,7 +9,7 @@ Dal brano alla parte di basso, come programma a sé: niente browser, niente Java
 | | |
 |---|---|
 | **Motore** (separazione del basso, note, tempo e battute, diteggiatura, tablatura) | fatto |
-| **Finestra** (riproduzione a velocità variabile, tablatura che scorre, manico) | fatta, prima versione |
+| **Finestra** (riproduzione a velocità variabile, tablatura che scorre, manico, accordi, correzioni a mano, metronomo, esportazione) | fatta |
 | **Applicazione** per macOS (Apple Silicon), Windows e Linux | fatta: si scarica dalla pagina [Releases](https://github.com/MassimoDanieli/C_bass/releases) e si installa; non è firmata |
 
 Il motore è nato come copia fedele di quello di Manico 7.2.0. La lettura delle note è stata poi rifatta (vedi sotto) e non coincide più con quella di Manico.
@@ -43,7 +43,7 @@ Nessuno è firmato con un certificato a pagamento, quindi al primo avvio il sist
 
 ## L'applicazione
 
-Si apre `C_bass` e si trascina un brano (MP3 o WAV) nella finestra, oppure lo si sceglie con «Scegli un file…». La prima volta il brano viene analizzato (circa un minuto); poi resta nell'elenco e si riapre subito.
+Si apre `C_bass` e si trascina un brano nella finestra, oppure lo si sceglie con «Scegli un file…». MP3, WAV e FLAC si leggono senza altro; M4A, AAC, Ogg e AIFF passano per `afconvert` su macOS (c'è già) o per `ffmpeg` su Windows e Linux (va installato). La prima volta il brano viene analizzato (circa un minuto, e si può annullare); poi resta nell'elenco e si riapre subito.
 
 Nell'elenco ci sono già cinque brani scritti per il programma, con basso e batteria già separati: un blues in Mi, un funk in Mi, una bossa nova in La, un walking in Fa e un rock in Sol. Servono a provare la finestra e a farci le mani; si possono togliere.
 
@@ -56,12 +56,22 @@ Durante la riproduzione:
 - **velocità** dal 40% al 120% senza cambiare l'intonazione, e senza ribattere le note: l'attacco passa una volta sola, il tempo si recupera nella nota che suona;
 - **ripeti** da una battuta a un'altra;
 - volume separato per il **basso** e per **il resto**: basso a zero per suonarci sopra, il resto a zero per sentire solo il basso;
-- strumento a 4, 5 o 6 corde: la diteggiatura si ricalcola;
+- strumento a 4, 5 o 6 corde: la diteggiatura si ricalcola; con «primi tasti» resta vicino al capotasto dove la linea lo permette, con «tutto il manico» va dove la mano si sposta di meno;
+- gli **accordi** sono scritti sopra le battute: il programma li legge dalla base (maggiore, minore, settima, minore settima, settima maggiore), con l'aiuto del basso per la fondamentale. Finora la lettura è stata verificata solo sui cinque brani inclusi (fondamentali tutte giuste, una settima letta come maggiore semplice): su registrazioni vere va presa come una proposta da correggere;
 - **stanghette** spostabili di un quarto, quando l'«uno» è stato sentito nel punto sbagliato;
+- una battuta può avere una **lunghezza sua** (una battuta in 2/4 dentro un brano in 4/4): i pulsanti − e + in alto a destra nella tablatura cambiano quella in cui ci si trova, e le stanghette dopo si spostano di conseguenza;
 - una nota di cui il programma non è sicuro (smorzata, o brevissima) porta un **?**;
 - se nel brano il basso non c'è (una base per suonarci sopra), lo dice invece di inventare note.
 
-Tasti: spazio suona e ferma, ← → una battuta indietro e avanti, ↑ ↓ velocità, A e B inizio e fine della ripetizione, L la accende e la spegne, M basso muto, Esc torna all'elenco.
+**Correggere.** Un clic su una nota la sceglie: sotto la tablatura compaiono i pulsanti per alzarla o abbassarla di un semitono, spostarla su un'altra corda, allungarla o accorciarla, anticiparla o ritardarla di un sedicesimo, toglierla. «+ Nota» ne mette una nel punto in cui ci si trova. Un clic su un accordo permette di cambiarne la fondamentale e il tipo o di toglierlo; «+ Accordo» ne aggiunge uno. «Annulla» (o Cmd/Ctrl+Z) torna indietro, fino a cento passi. Le correzioni restano salvate con il brano.
+
+**Studiare.** «Conta una battuta» fa sentire una battuta di clic prima che il brano parta; «Metronomo» batte i quarti sul tempo vero della registrazione, più forte sull'uno; «Più veloce a ogni giro» alza la velocità del 5% a ogni ripetizione del tratto scelto, fino al 100%: si parte lenti e si arriva a tempo.
+
+**Esportare.** «Esporta» scrive la parte nella cartella dei download: un **PDF** da stampare (tablatura, valori, accordi), un file **MusicXML** che Guitar Pro, MuseScore e simili aprono, o la tablatura in **testo**.
+
+Tasti: spazio suona e ferma, ← → una battuta indietro e avanti, ↑ ↓ velocità, A e B inizio e fine della ripetizione, L la accende e la spegne, M basso muto, K metronomo, Esc torna all'elenco. Con una nota scelta: ↑ ↓ un semitono, Maiusc+↑ ↓ cambia corda, ← → passa alla nota vicina, Maiusc+← → la sposta, − e = la accorcia e la allunga, Canc la toglie, Esc la lascia.
+
+Quando niente si muove la finestra non viene ridisegnata: ferma, non consuma.
 
 I brani analizzati stanno nella cartella dell'utente (`~/Library/Application Support/C_bass` su macOS, `%AppData%\C_bass` su Windows, `~/.config/C_bass` su Linux); il file originale non viene toccato.
 
@@ -89,16 +99,18 @@ Legge MP3 e WAV.
 
 | Pacchetto | Cosa fa |
 |---|---|
-| `internal/audio` | lettura di WAV e MP3, ricampionamento, scrittura WAV |
+| `internal/audio` | lettura di WAV, MP3 e FLAC (gli altri formati con l'aiuto del sistema), ricampionamento, scrittura WAV |
 | `internal/demucs` | separazione in batteria, basso, altro e voce: spettrogramma, rete (ONNX Runtime), ricostruzione |
 | `internal/transcribe` | le note: su un basso isolato si segue la nota (una tenuta è una nota sola) e la sua altezza si legge dall'intera nota, non momento per momento; su un mix si cercano gli attacchi |
-| `internal/rhythm` | tempo e beat della registrazione, note sulla griglia dei sedicesimi, valori e legature |
+| `internal/rhythm` | tempo e beat della registrazione, battute anche di lunghezza diversa, note sulla griglia dei sedicesimi, valori e legature |
+| `internal/chords` | gli accordi, dalla base e dal basso |
 | `internal/fretboard` | accordature e diteggiatura |
 | `internal/tab` | tablatura in testo |
+| `internal/export` | PDF e MusicXML |
 | `internal/provision` | trova o scarica libreria e modello |
 | `internal/project` | tutto il percorso, dal brano alla parte: lo usano riga di comando e finestra |
 | `internal/library` | i brani già analizzati |
-| `internal/player` | riproduzione: due tracce, velocità variabile a intonazione ferma (WSOLA), ripetizione |
+| `internal/player` | riproduzione: due tracce, velocità variabile a intonazione ferma (WSOLA), ripetizione, metronomo e conto iniziale |
 | `internal/demo` | i cinque brani inclusi: scritti in codice, suonati da un sintetizzatore a corda pizzicata |
 | `internal/app` | la finestra ([Ebitengine](https://ebitengine.org)) |
 | `cmd/cbass`, `cmd/cbass-app` | la riga di comando e l'applicazione |
@@ -125,9 +137,9 @@ Il codice è GPL-3.0-or-later. I pesi del modello derivano da quelli pubblicati 
 
 ## English
 
-**Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It began as a faithful port of Manico 7.2.0; the note reader has since been redone. Measured against a score (a 3:21 recording whose bass is written in a Guitar Pro file, 155 notes): 148 right, 5 an octave off, 2 wrong and 39 extra notes before; 155 right and none extra now. That recording is a synthetic bass, the easy case; on a plucked line with repeats, octaves and muted notes from 90 to 170 BPM it went from 91–93% to 100%. The pitch is now read from the whole note rather than frame by frame, a note is not split where only its sound changes, pitch is followed between semitones, and the separated bass is measured against the recording so that what is left of no bass is not read as notes. The window is in its first version; the applications are on the [Releases](https://github.com/MassimoDanieli/C_bass/releases) page: a disk image for macOS (Apple Silicon), an installer and a portable program for Windows, a `.deb` and an archive with `./install.sh` for Linux. None is signed with a paid certificate, so the system asks before the first start (macOS: System Settings → Privacy & Security → Open Anyway; Windows: More info → Run anyway).
+**Status.** The engine is done: bass separation (Demucs through ONNX Runtime), notes, tempo and bars, fingering, tablature. It began as a faithful port of Manico 7.2.0; the note reader has since been redone. Measured against a score (a 3:21 recording whose bass is written in a Guitar Pro file, 155 notes): 148 right, 5 an octave off, 2 wrong and 39 extra notes before; 155 right and none extra now. That recording is a synthetic bass, the easy case; on a plucked line with repeats, octaves and muted notes from 90 to 170 BPM it went from 91–93% to 100%. The pitch is now read from the whole note rather than frame by frame, a note is not split where only its sound changes, pitch is followed between semitones, and the separated bass is measured against the recording so that what is left of no bass is not read as notes. The applications are on the [Releases](https://github.com/MassimoDanieli/C_bass/releases) page: a disk image for macOS (Apple Silicon), an installer and a portable program for Windows, a `.deb` and an archive with `./install.sh` for Linux. None is signed with a paid certificate, so the system asks before the first start (macOS: System Settings → Privacy & Security → Open Anyway; Windows: More info → Run anyway).
 
-**The application.** Five pieces written for the program come with it (a blues, a funk, a bossa nova, a walking line, a rock), bass and drums already apart, to try the window and practise on. The window is in Italian or English, following the computer's language, with a button to switch. Open `C_bass` and drop a recording (MP3 or WAV) on the window. The first time it is analysed, which takes about a minute; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. The bar lines can be moved by a beat, a note the reader is unsure of carries a question mark, and a recording with no bass in it is said to have none rather than given made-up notes. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, Esc back to the list. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
+**The application.** Five pieces written for the program come with it (a blues, a funk, a bossa nova, a walking line, a rock), bass and drums already apart, to try the window and practise on. The window is in Italian or English, following the computer's language, with a button to switch. Open `C_bass` and drop a recording on the window: MP3, WAV and FLAC are read directly; M4A, AAC, Ogg and AIFF go through `afconvert` on macOS (already there) or `ffmpeg` on Windows and Linux (to be installed). The first time it is analysed, which takes about a minute and can be cancelled; after that it stays in the list and opens at once. While it plays, the tablature scrolls under a fixed line (a held note is written once, with a line as long as it lasts, and note values under the staff), the neck shows the one note to play, the speed goes from 40% to 120% without changing the pitch and without striking notes twice (an attack goes by once, and the time is made up in the note ringing after it), a stretch of bars can be repeated, and the bass and the rest each have their own volume. The chords are written above the bars, read from the backing with the help of the bass for the root (major, minor, seventh, minor seventh, major seventh); so far this has only been checked on the five built-in pieces (every root right, one seventh read as a plain major), so on real recordings take it as a proposal to correct. The fingering can be kept near the nut ("first frets") or left to go where the hand moves least ("whole neck"). The bar lines can be moved by a beat, and a single bar can be given its own length (a 2/4 bar in a 4/4 piece) with the − and + buttons at the top right of the tablature. A note the reader is unsure of carries a question mark, and a recording with no bass in it is said to have none rather than given made-up notes. *Correcting:* click a note to choose it, then raise or lower it by a semitone, move it to another string, make it longer or shorter, earlier or later by a sixteenth, or remove it; "+ Note" adds one where you are. Click a chord to change its root and kind or remove it; "+ Chord" adds one. "Undo" (or Cmd/Ctrl+Z) goes back, up to a hundred steps. Corrections are saved with the recording. *Practising:* "Count a bar in" plays a bar of clicks before the recording starts, "Metronome" clicks the beats on the recording's real tempo, and "Faster every time round" raises the speed by 5% at each pass of the repeated stretch, up to 100%. *Exporting:* "Export" writes the part to the Downloads folder as a PDF to print, as MusicXML for Guitar Pro, MuseScore and the like, or as text tablature. Keys: space to play and stop, ← → a bar back and on, ↑ ↓ speed, A and B the start and end of the repeat, L to turn it on and off, M to mute the bass, K the metronome, Esc back to the list; with a note chosen, ↑ ↓ a semitone, Shift+↑ ↓ another string, ← → the next note, Shift+← → move it, − and = shorter and longer, Delete removes it, Esc lets it go. A window in which nothing moves is not redrawn. Analysed recordings are kept in the user's folder (`~/Library/Application Support/C_bass` on macOS, `%AppData%\C_bass` on Windows).
 
 **Command line.** `cbass -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. `cbass help` lists the options.
 

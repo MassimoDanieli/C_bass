@@ -58,6 +58,7 @@ Homepage: https://github.com/MassimoDanieli/C_bass
 Installed-Size: $(du -sk "$deb/usr" | cut -f1)
 Depends: libc6 (>= 2.34), libx11-6, libxrandr2, libxcursor1, libxinerama1, libxi6, libxxf86vm1, libgl1, libasound2t64 | libasound2
 Recommends: zenity | kdialog
+Suggests: ffmpeg
 Description: From a recording to a bass part
  C_bass separates the bass from a recording, reads its notes and writes them
  as a tablature that scrolls while the recording plays, with the neck showing

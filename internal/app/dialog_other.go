@@ -11,8 +11,8 @@ import (
 // was chosen.
 func chooseFile(prompt string) string {
 	for _, command := range [][]string{
-		{"zenity", "--file-selection", "--title", prompt, "--file-filter", "MP3, WAV | *.mp3 *.wav *.MP3 *.WAV"},
-		{"kdialog", "--title", prompt, "--getopenfilename", ".", "*.mp3 *.wav"},
+		{"zenity", "--file-selection", "--title", prompt, "--file-filter", "Audio | *.mp3 *.wav *.flac *.m4a *.aac *.ogg *.opus *.aif *.aiff *.MP3 *.WAV *.FLAC *.M4A"},
+		{"kdialog", "--title", prompt, "--getopenfilename", ".", "*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.opus *.aif *.aiff"},
 	} {
 		if _, err := exec.LookPath(command[0]); err != nil {
 			continue

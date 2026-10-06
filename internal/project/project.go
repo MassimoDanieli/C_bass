@@ -5,6 +5,7 @@ package project
 
 import (
 	"github.com/MassimoDanieli/c_bass/internal/audio"
+	"github.com/MassimoDanieli/c_bass/internal/chords"
 	"github.com/MassimoDanieli/c_bass/internal/demucs"
 	"github.com/MassimoDanieli/c_bass/internal/fretboard"
 	"github.com/MassimoDanieli/c_bass/internal/provision"
@@ -24,6 +25,10 @@ type Project struct {
 	Events   []transcribe.Event `json:"events"`
 	// Reader is the version of the note reader that wrote Events: see Reader.
 	Reader int `json:"reader,omitempty"`
+	// Chords are the chords of the piece; nil when they have not been looked for yet.
+	Chords []chords.Chord `json:"chords"`
+	// Low keeps the fingering near the nut, where the line allows it.
+	Low bool `json:"lowPosition,omitempty"`
 	// Key of the piece as a pitch name, when it is known: the pieces that come with the program have one.
 	Key string `json:"key,omitempty"`
 	// BuiltIn marks a piece that came with the program.
@@ -52,7 +57,14 @@ type Options struct {
 	Mix bool
 	// Bass is a bass already isolated, to use instead of separating.
 	Bass *audio.Buffer
+	// Low keeps the fingering near the nut, where the line allows it.
+	Low bool
+	// Stop, if set, is asked now and then whether to give up; Analyse then returns ErrStopped.
+	Stop func() bool
 }
+
+// ErrStopped is what Analyse returns when it was asked to stop.
+var ErrStopped = demucs.ErrStopped
 
 // Stage is one part of the work.
 type Stage int
@@ -121,7 +133,7 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 	}
 
 	tuning := fretboard.TuningFor(options.Tuning)
-	events := read(source, mix, isolated && options.Bass == nil, tuning, options.Frets, options.Sensitivity, func(done float64) {
+	events := read(source, mix, isolated && options.Bass == nil, tuning, options.Frets, options.Low, options.Sensitivity, func(done float64) {
 		report(Step{Stage: ReadingNotes, Done: int64(done * 1000), Total: 1000})
 	})
 	report(Step{Stage: NotesRead, Done: int64(len(events))})
@@ -137,15 +149,16 @@ func Analyse(mix *audio.Buffer, title string, options Options, report func(Step)
 	result.Project = &Project{
 		Reader:  Reader,
 		Version: options.Version, Title: title, Duration: mix.Duration(), Source: map[bool]string{true: "bass", false: "mix"}[isolated],
-		Tuning: tuning.Key, Frets: options.Frets, Rhythm: pulse, Events: events,
+		Tuning: tuning.Key, Frets: options.Frets, Rhythm: pulse, Events: events, Low: options.Low,
 	}
+	Harmonise(result)
 	return result, nil
 }
 
 // read finds the notes in a bass and chooses where to play them. A bass separated from a
 // recording is held against that recording: 34 dB under it there is no bass, only what the
 // separation left behind.
-func read(bass, mix *audio.Buffer, separated bool, tuning fretboard.Tuning, frets int, sensitivity float64, progress func(float64)) []transcribe.Event {
+func read(bass, mix *audio.Buffer, separated bool, tuning fretboard.Tuning, frets int, low bool, sensitivity float64, progress func(float64)) []transcribe.Event {
 	var floor float64
 	if separated {
 		floor = transcribe.Level(mix) * 0.02
@@ -153,7 +166,7 @@ func read(bass, mix *audio.Buffer, separated bool, tuning fretboard.Tuning, fret
 	events := transcribe.Transcribe(bass, transcribe.Options{
 		Isolated: bass != mix, Sensitivity: sensitivity, Floor: floor, Lowest: tuning.Open[0], Progress: progress,
 	})
-	events = fretboard.Finger(events, tuning, frets)
+	events = fretboard.FingerWith(events, tuning, frets, low)
 	if events == nil {
 		events = []transcribe.Event{} // no bass in the recording: nothing to read, still something to play along to
 	}
@@ -167,6 +180,12 @@ func Reread(result *Result) bool {
 	if p.Reader >= Reader || result.Bass == nil || result.Backing == nil {
 		return false
 	}
+	for _, event := range p.Events {
+		if event.Edited { // corrected by hand: what a person wrote is not read over
+			p.Reader = Reader
+			return true
+		}
+	}
 	mix := &audio.Buffer{SampleRate: result.Bass.SampleRate, Channels: make([][]float32, len(result.Bass.Channels))}
 	for c := range mix.Channels {
 		mix.Channels[c] = make([]float32, min(result.Bass.Len(), result.Backing.Len()))
@@ -178,8 +197,19 @@ func Reread(result *Result) bool {
 	if frets <= 0 {
 		frets = 12
 	}
-	p.Events = read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, 0, nil)
+	p.Events = read(result.Bass, mix, true, fretboard.TuningFor(p.Tuning), frets, p.Low, 0, nil)
 	p.Reader = Reader
+	return true
+}
+
+// Harmonise reads the chords of a recording that has none written down yet, from what is left
+// of it without the bass. It reports whether anything was done.
+func Harmonise(result *Result) bool {
+	p := result.Project
+	if p.Chords != nil || result.Backing == nil || p.Rhythm == nil {
+		return false
+	}
+	p.Chords = chords.Find(result.Backing, p.Rhythm, p.Events)
 	return true
 }
 
@@ -188,7 +218,7 @@ func (p *Project) Refinger(tuning string, frets int) {
 	t := fretboard.TuningFor(tuning)
 	p.Tuning, p.Frets = t.Key, frets
 	if len(p.Events) > 0 {
-		p.Events = fretboard.Finger(p.Events, t, frets)
+		p.Events = fretboard.FingerWith(p.Events, t, frets, p.Low)
 	}
 }
 
@@ -209,6 +239,7 @@ func separate(mix *audio.Buffer, options Options, report func(Step)) (demucs.Ste
 		return nil, err
 	}
 	defer separator.Close()
+	separator.Stop = options.Stop
 	return separator.Separate(mix, func(done, total int) {
 		report(Step{Stage: Separating, Done: int64(done), Total: int64(total)})
 	})

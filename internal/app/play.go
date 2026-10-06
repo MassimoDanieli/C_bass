@@ -26,36 +26,132 @@ func (g *Game) playScreen(c *canvas) {
 		return
 	}
 	now := s.player.Position()
+	const pad = 20
+	header := rect{0, 0, g.w, 64}
+	controls := rect{pad, g.h - 184, g.w - 2*pad, 164}
+	middle := rect{pad, header.h, g.w - 2*pad, controls.y - header.h - 14}
+	tabHeight := float32(math.Round(float64(middle.h * 0.58)))
+	tab := rect{middle.x, middle.y, middle.w, tabHeight}
+	neck := rect{middle.x, middle.y + tabHeight + 14, middle.w, middle.h - tabHeight - 14}
+
+	// the menu, when open, is in front of everything: it takes the click first
+	export := rect{g.w - 20 - 44 - 10 - 96, 15, 96, 34}
+	if c.in != nil && g.menu {
+		g.exportMenu(c, export, s)
+		if c.in.pressed || c.in.released {
+			if c.in.released {
+				g.menu = false
+			}
+			swallowed := *c.in
+			swallowed.pressed, swallowed.released, swallowed.down = false, false, false
+			c = &canvas{in: &swallowed, mx: c.mx, my: c.my, scale: c.scale, w: c.w, h: c.h}
+		}
+	}
 	if c.in != nil {
 		g.playKeys(s, now)
 		if g.song == nil {
 			return
 		}
 	}
-	const pad = 20
-	header := rect{0, 0, g.w, 64}
-	controls := rect{pad, g.h - 150, g.w - 2*pad, 130}
-	middle := rect{pad, header.h, g.w - 2*pad, controls.y - header.h - 14}
-	tabHeight := float32(math.Round(float64(middle.h * 0.53)))
-	tab := rect{middle.x, middle.y, middle.w, tabHeight}
-	neck := rect{middle.x, middle.y + tabHeight + 14, middle.w, middle.h - tabHeight - 14}
-
-	g.playHeader(c, header, s, now)
+	g.playHeader(c, header, export, s, now)
 	if g.song == nil {
 		return
 	}
 	g.drawTab(c, tab, s, now)
 	g.drawNeck(c, neck, s, now)
 	g.playControls(c, controls, s, now)
+	if c.painting() && g.menu {
+		g.exportMenu(c, export, s)
+	}
+}
+
+// togglePlay starts or stops. Starting counts a bar in first, if that is wanted.
+func (g *Game) togglePlay(s *song, now float64) {
+	p := s.player
+	if p.Playing() {
+		p.SetPlaying(false)
+		return
+	}
+	if !g.settings.CountIn || now >= p.Duration()-0.1 {
+		p.SetPlaying(true)
+		return
+	}
+	// as many clicks as the bar has beats, as far apart as the beats are here and at this speed
+	page := s.page(now)
+	apart := (s.moment(page+1) - s.moment(page)) / p.Speed()
+	if apart <= 0 {
+		apart = 0.5
+	}
+	p.PlayCounted(s.pulse.BeatsIn(s.bar(now)), apart)
+}
+
+// saved writes the part to the library after a change made by hand.
+func (g *Game) saved(s *song) {
+	if err := g.lib.SaveProject(s.id, s.project); err != nil {
+		g.say(err.Error())
+	}
 }
 
 func (g *Game) playKeys(s *song, now float64) {
 	p := s.player
+	command := ebiten.IsKeyPressed(ebiten.KeyMeta) || ebiten.IsKeyPressed(ebiten.KeyControl)
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+	if command && g.pressed(ebiten.KeyZ) {
+		if s.undo() {
+			g.saved(s)
+		}
+		return
+	}
+	// with a note chosen, the keys work on it
+	if i := s.find(s.chosen); i >= 0 {
+		switch {
+		case g.pressed(ebiten.KeyEscape):
+			s.chosen = ""
+		case g.pressed(ebiten.KeyArrowUp) && shift:
+			s.restring(i, 1)
+		case g.pressed(ebiten.KeyArrowDown) && shift:
+			s.restring(i, -1)
+		case g.pressed(ebiten.KeyArrowUp):
+			s.transpose(i, 1)
+		case g.pressed(ebiten.KeyArrowDown):
+			s.transpose(i, -1)
+		case g.pressed(ebiten.KeyArrowLeft) && shift:
+			s.move(i, -1)
+		case g.pressed(ebiten.KeyArrowRight) && shift:
+			s.move(i, 1)
+		case g.pressed(ebiten.KeyArrowLeft) && i > 0:
+			s.chosen = s.project.Events[i-1].ID
+			p.Seek(s.project.Events[i-1].Start)
+			return
+		case g.pressed(ebiten.KeyArrowRight) && i+1 < len(s.project.Events):
+			s.chosen = s.project.Events[i+1].ID
+			p.Seek(s.project.Events[i+1].Start)
+			return
+		case g.pressed(ebiten.KeyMinus):
+			s.resize(i, -1)
+		case g.pressed(ebiten.KeyEqual):
+			s.resize(i, 1)
+		case g.pressed(ebiten.KeyDelete), g.pressed(ebiten.KeyBackspace):
+			s.remove(i)
+			s.chosen = ""
+		case g.pressed(ebiten.KeySpace):
+			g.togglePlay(s, now)
+			return
+		default:
+			return
+		}
+		g.saved(s)
+		return
+	}
 	switch {
 	case g.pressed(ebiten.KeySpace):
-		p.SetPlaying(!p.Playing())
+		g.togglePlay(s, now)
 	case g.pressed(ebiten.KeyEscape):
-		g.goHome()
+		if s.chord >= 0 {
+			s.chord = -1
+		} else {
+			g.goHome()
+		}
 	case g.pressed(ebiten.KeyArrowLeft):
 		bar := s.bar(now)
 		if now-s.barStart(bar) < 0.35 {
@@ -88,6 +184,10 @@ func (g *Game) playKeys(s *song, now float64) {
 		}
 		p.SetGains(g.settings.Bass, g.settings.Rest)
 		g.saveSettings()
+	case g.pressed(ebiten.KeyK):
+		g.settings.Metronome = !g.settings.Metronome
+		p.SetMetronome(g.settings.Metronome)
+		g.saveSettings()
 	}
 }
 
@@ -96,7 +196,7 @@ func (g *Game) nudgeSpeed(s *song, by float64) {
 	s.player.SetSpeed(math.Max(0.4, math.Min(1.2, speed)))
 }
 
-func (g *Game) playHeader(c *canvas, r rect, s *song, now float64) {
+func (g *Game) playHeader(c *canvas, r, export rect, s *song, now float64) {
 	if g.button(c, "back", rect{20, 15, 92, 34}, g.t("‹  Brani", "‹  Library"), plain) {
 		g.goHome()
 		return
@@ -104,19 +204,15 @@ func (g *Game) playHeader(c *canvas, r rect, s *song, now float64) {
 	if g.button(c, "language", rect{r.w - 20 - 44, 15, 44, 34}, g.t("EN", "IT"), quiet) {
 		g.switchLanguage()
 	}
+	if g.button(c, "export", export, g.t("Esporta", "Export"), map[bool]look{true: chosen, false: plain}[g.menu]) {
+		g.menu = !g.menu
+	}
 	names := ""
 	for _, open := range s.tuning.Open {
 		names += " " + g.noteName(open)
 	}
 	tuningText := fmt.Sprintf("%d %s  ·", len(s.tuning.Open), g.t("corde", "strings")) + names
-	tuning := rect{r.w - 20 - 44 - 10 - 230, 15, 230, 34}
-	bars := fmt.Sprintf("%s %d", g.t("battuta", "bar"), s.bar(now)+1)
-	c.label(bars, tuning.x-18, 32, 14, regular, colDim, right)
-	room := tuning.x - 18 - c.width(bars, 14, regular) - 24 - 130
-	title := c.fit(g.titleOf(s.project.Title, s.project.Key), 19, bold, room*0.62)
-	c.label(title, 130, 32, 19, bold, colText, left)
-	about := fmt.Sprintf("%.0f BPM  ·  %d/4  ·  %d %s", s.pulse.Tempo(), s.perBar, len(s.project.Events), g.t("note", "notes"))
-	c.label(c.fit(about, 14, regular, room-c.width(title, 19, bold)-18), 130+c.width(title, 19, bold)+18, 33, 14, regular, colDim, left)
+	tuning := rect{export.x - 10 - 200, 15, 200, 34}
 	if g.button(c, "tuning", tuning, tuningText, plain) {
 		next := fretboard.Tunings[0]
 		for i, t := range fretboard.Tunings {
@@ -127,99 +223,227 @@ func (g *Game) playHeader(c *canvas, r rect, s *song, now float64) {
 		s.retune(next.Key)
 		g.settings.Tuning = next.Key
 		g.saveSettings()
-		if err := g.lib.SaveProject(s.id, s.project); err != nil {
-			g.say(err.Error())
+		g.saved(s)
+	}
+	// where on the neck: near the nut, or wherever the hand moves least
+	place := rect{tuning.x - 10 - 132, 15, 132, 34}
+	placeText := g.t("tutto il manico", "whole neck")
+	if s.project.Low {
+		placeText = g.t("primi tasti", "first frets")
+	}
+	if g.button(c, "place", place, placeText, map[bool]look{true: chosen, false: plain}[s.project.Low]) {
+		s.project.Low = !s.project.Low
+		g.settings.Low = s.project.Low
+		g.saveSettings()
+		s.retune(s.tuning.Key)
+		g.saved(s)
+	}
+	bars := fmt.Sprintf("%s %d", g.t("battuta", "bar"), s.bar(now)+1)
+	c.label(bars, place.x-18, 32, 14, regular, colDim, right)
+	room := place.x - 18 - c.width(bars, 14, regular) - 24 - 130
+	title := c.fit(g.titleOf(s.project.Title, s.project.Key), 19, bold, room*0.62)
+	c.label(title, 130, 32, 19, bold, colText, left)
+	about := fmt.Sprintf("%.0f BPM  ·  %d/4  ·  %d %s", s.pulse.Tempo(), s.perBar, len(s.project.Events), g.t("note", "notes"))
+	c.label(c.fit(about, 14, regular, room-c.width(title, 19, bold)-18), 130+c.width(title, 19, bold)+18, 33, 14, regular, colDim, left)
+}
+
+// exportMenu is the short list under the Export button.
+func (g *Game) exportMenu(c *canvas, under rect, s *song) {
+	items := []struct{ kind, text string }{
+		{"pdf", g.t("PDF da stampare", "PDF to print")},
+		{"musicxml", g.t("MusicXML (Guitar Pro, MuseScore)", "MusicXML (Guitar Pro, MuseScore)")},
+		{"text", g.t("Tablatura in testo", "Tablature as text")},
+	}
+	box := rect{under.x + under.w - 290, under.y + under.h + 6, 290, float32(len(items))*38 + 12}
+	c.round(box, 10, colRaised)
+	c.outline(box, 10, 1, colLine)
+	for i, item := range items {
+		row := rect{box.x + 6, box.y + 6 + float32(i)*38, box.w - 12, 36}
+		if c.painting() && row.has(c.mx, c.my) {
+			c.round(row, 7, colHover)
+		}
+		c.label(item.text, row.x+12, row.y+18, 14, regular, colText, left)
+		if c.in != nil && c.in.released && row.has(c.in.x, c.in.y) {
+			g.export(s, item.kind)
 		}
 	}
 }
 
+// tabView is where things are in the tablature panel.
+type tabView struct {
+	r                       rect
+	gutter                  float32
+	staffTop, staffBottom   float32
+	spacing, head           float32
+	page                    float64
+	strings                 int
+	chordsY, editY, valuesY float32
+}
+
+// chordX is where the name of a chord is written: where the chord begins, or at the left
+// edge while it lasts and its beginning has gone by, so that the chord being played is
+// always named.
+func (g *Game) chordX(c *canvas, s *song, v tabView, i int) float32 {
+	chord := s.project.Chords[i]
+	x := v.xOf(s.page(chord.Start))
+	edge := v.r.x + v.gutter + 8
+	if x >= edge {
+		return x
+	}
+	last := v.xOf(s.page(chord.End)) - c.width(chord.Name(!g.settings.English), 16, bold) - 18
+	return max(x, min(edge, last))
+}
+
+func (v tabView) xOf(beats float64) float32 { return v.head + float32((beats-v.page)*pixelsPerBeat) }
+func (v tabView) beatsAt(x float32) float64 { return v.page + float64((x-v.head)/pixelsPerBeat) }
+func (v tabView) lineOf(str int) float32    { return v.staffBottom - float32(str)*v.spacing }
+func (v tabView) inside() rect              { return rect{v.r.x + v.gutter, v.r.y, v.r.w - v.gutter - 8, v.r.h} }
+
+func (g *Game) tabView(r rect, s *song, now float64) tabView {
+	v := tabView{r: r, gutter: 52, strings: len(s.tuning.Open), page: s.page(now)}
+	const above, values, edit = 82, 44, 50
+	room := r.h - above - values - edit
+	v.spacing = max(13, min(40, room/float32(v.strings-1)))
+	v.staffTop = r.y + above + max(0, (room-v.spacing*float32(v.strings-1))/2)
+	v.staffBottom = v.staffTop + v.spacing*float32(v.strings-1)
+	v.head = r.x + v.gutter + (r.w-v.gutter)*0.27
+	v.chordsY = v.staffTop - 42
+	v.editY = r.y + r.h - 44
+	return v
+}
+
+// lead is how far before the first note of its bar a bar line stands: half a sixteenth.
+const lead = pixelsPerBeat / 8
+
 // drawTab writes the tablature around the present moment. The page moves, the line where
-// to play stays still: a number reaches it when its note sounds.
+// to play stays still: a number reaches it when its note sounds. A note or a chord can be
+// chosen with a click, and put right with the buttons under the staff.
 func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
-	// the bar lines can be moved by a beat, when the "one" was heard in the wrong place
-	shift := rect{r.x + r.w - 92, r.y + 8, 34, 26}
-	for i, by := range []int{-1, 1} {
-		if g.button(c, []string{"bars-back", "bars-on"}[i], rect{shift.x + float32(i)*40, shift.y, shift.w, shift.h}, []string{"‹", "›"}[i], quiet) {
-			s.shiftBars(by)
-			if err := g.lib.SaveProject(s.id, s.project); err != nil {
-				g.say(err.Error())
+	v := g.tabView(r, s, now)
+	if c.painting() {
+		c.round(r, 14, colPanel)
+		c.label("TAB", r.x+18, r.y+22, 11, bold, colFaint, left)
+	}
+	g.barControls(c, v, s, now)
+	if len(s.project.Events) == 0 && len(s.project.Chords) == 0 && c.painting() {
+		c.label(g.t("In questo brano non c'è un basso.", "There is no bass in this recording."), r.x+r.w/2, r.y+r.h/2-24, 20, medium, colText, centre)
+		c.label(g.t("Non c'è niente da trascrivere: resta la base, da suonarci sopra.", "There is nothing to write out: what is left is the backing, to play along to."), r.x+r.w/2, r.y+r.h/2+6, 14, regular, colDim, centre)
+	}
+	firstBeat := v.beatsAt(r.x+v.gutter) - 1
+	lastBeat := v.beatsAt(r.x+r.w) + 1
+	events := s.project.Events
+	placed := s.score.Placed
+	firstSlot, lastSlot := int(math.Floor(firstBeat*rhythm.Division))-s.score.BarSlots, int(math.Ceil(lastBeat*rhythm.Division))
+	from := sort.Search(len(placed), func(i int) bool { return placed[i].Slot+placed[i].Slots >= firstSlot })
+
+	// a click on the page: on a chord, on a note, or on an empty place to go there
+	if zone := (rect{r.x + v.gutter, v.chordsY - 12, r.w - v.gutter - 8, v.staffBottom + 14 - (v.chordsY - 12)}); c.in != nil && c.in.pressed && zone.has(c.in.x, c.in.y) {
+		hit := false
+		for i, chord := range s.project.Chords {
+			x := g.chordX(c, s, v, i)
+			if (rect{x - 6, v.chordsY - 12, c.width(chord.Name(!g.settings.English), 16, bold) + 12, 24}).has(c.in.x, c.in.y) {
+				s.chord, s.chosen, hit = i, "", true
+			}
+		}
+		for i := from; !hit && i < len(placed) && placed[i].Slot <= lastSlot; i++ {
+			event := events[placed[i].Index]
+			x := v.xOf(float64(placed[i].Slot) / rhythm.Division)
+			y := v.staffTop - 17
+			if event.String >= 0 && event.String < v.strings {
+				y = v.lineOf(event.String)
+			}
+			if (rect{x - 14, y - 13, 28, 26}).has(c.in.x, c.in.y) {
+				s.chosen, s.chord, hit = event.ID, -1, true
+			}
+		}
+		if !hit {
+			s.chosen, s.chord = "", -1
+			if c.in.y >= v.staffTop-14 {
+				s.player.Seek(s.moment(v.beatsAt(c.in.x)))
 			}
 		}
 	}
+	g.editBar(c, v, s, now)
 	if !c.painting() {
 		return
 	}
-	c.round(r, 14, colPanel)
-	for i := range []int{-1, 1} {
-		g.button(c, []string{"bars-back", "bars-on"}[i], rect{shift.x + float32(i)*40, shift.y, shift.w, shift.h}, []string{"‹", "›"}[i], quiet)
-	}
-	c.label(g.t("stanghette", "bar lines"), shift.x-10, shift.y+13, 12, regular, colFaint, right)
-	if len(s.project.Events) == 0 {
-		c.label(g.t("In questo brano non c'è un basso.", "There is no bass in this recording."), r.x+r.w/2, r.y+r.h/2-14, 20, medium, colText, centre)
-		c.label(g.t("Non c'è niente da trascrivere: resta la base, da suonarci sopra.", "There is nothing to write out: what is left is the backing, to play along to."), r.x+r.w/2, r.y+r.h/2+16, 14, regular, colDim, centre)
-		return
-	}
-	strings := len(s.tuning.Open)
-	const gutter = 52
-	spacing := max(16, min(42, (r.h-48-66)/float32(strings-1)))
-	staffTop := r.y + 48 + ((r.h-48-66)-spacing*float32(strings-1))/2
-	staffBottom := staffTop + spacing*float32(strings-1)
-	lineOf := func(str int) float32 { return staffBottom - float32(str)*spacing }
-	head := r.x + gutter + (r.w-gutter)*0.27
-	page := s.page(now)
-	xOf := func(beats float64) float32 { return head + float32((beats-page)*pixelsPerBeat) }
-	firstBeat := page - float64((head-r.x-gutter)/pixelsPerBeat) - 1
-	lastBeat := page + float64((r.x+r.w-head)/pixelsPerBeat) + 1
-	in := c.clip(rect{r.x + gutter, r.y, r.w - gutter - 8, r.h})
-	barSlots := s.score.BarSlots
-	const lead = pixelsPerBeat / 8 // a bar line stands half a sixteenth before the first note of its bar
 
+	in := c.clip(v.inside())
+	staffTop, staffBottom := v.staffTop, v.staffBottom
 	// the stretch being repeated
 	if s.loopOn {
-		x0, x1 := xOf(float64(s.loopA*s.perBar))-lead, xOf(float64((s.loopB+1)*s.perBar))-lead
+		x0, x1 := v.xOf(float64(s.pulse.BarStart(s.loopA)))-lead, v.xOf(float64(s.pulse.BarStart(s.loopB+1)))-lead
 		in.fill(rect{x0, staffTop - 16, x1 - x0, staffBottom - staffTop + 32}, fade(colAccent2, 0.09))
 		in.fill(rect{x0, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent2, 0.7))
 		in.fill(rect{x1 - 2, staffTop - 16, 2, staffBottom - staffTop + 32}, fade(colAccent2, 0.7))
 	}
 	// the strings
-	for str := 0; str < strings; str++ {
-		in.fill(rect{r.x + gutter, lineOf(str) - 0.5, r.w - gutter, 1}, colLine)
+	for str := 0; str < v.strings; str++ {
+		in.fill(rect{r.x + v.gutter, v.lineOf(str) - 0.5, r.w - v.gutter, 1}, colLine)
 	}
 	// beats and bar lines
 	for beat := int(math.Floor(firstBeat)); float64(beat) <= lastBeat; beat++ {
-		x := xOf(float64(beat)) - lead
-		if ((beat%s.perBar)+s.perBar)%s.perBar != 0 {
+		x := v.xOf(float64(beat)) - lead
+		bar := s.pulse.BarAt(float64(beat))
+		if s.pulse.BarStart(bar) != beat {
 			in.fill(rect{x, staffBottom + 4, 1, 5}, colFaint)
 			continue
 		}
 		in.fill(rect{x - 0.75, staffTop, 1.5, staffBottom - staffTop}, colDim)
-		if bar := beat / s.perBar; beat >= 0 {
-			in.label(fmt.Sprint(bar+1), x+5, staffTop-17, 12, medium, colDim, left)
+		if beat >= 0 {
+			text := fmt.Sprint(bar + 1)
+			ink := colDim
+			if beats := s.pulse.BeatsIn(bar); beats != s.perBar { // a bar of its own length says so
+				text += fmt.Sprintf("   %d/4", beats)
+				ink = colAccent2
+			}
+			in.label(text, x+5, staffTop-17, 12, medium, ink, left)
 		}
 	}
+	// the chords, above
+	for i, chord := range s.project.Chords {
+		if v.xOf(s.page(chord.Start)) > r.x+r.w || v.xOf(s.page(chord.End)) < r.x+v.gutter {
+			continue
+		}
+		x := g.chordX(c, s, v, i)
+		name := chord.Name(!g.settings.English)
+		ink := colText
+		switch {
+		case now >= chord.Start && now < chord.End:
+			ink = colAccent
+		case chord.End <= now:
+			ink = colFaint
+		}
+		if i == s.chord {
+			box := rect{x - 6, v.chordsY - 12, in.width(name, 16, bold) + 12, 24}
+			in.round(box, 7, fade(colAccent2, 0.18))
+			in.outline(box, 7, 1.5, colAccent2)
+		}
+		in.label(name, x, v.chordsY, 16, bold, ink, left)
+	}
 
-	events := s.project.Events
-	placed := s.score.Placed
 	sounding := s.sounding(now)
-	firstSlot, lastSlot := int(math.Floor(firstBeat*rhythm.Division))-barSlots, int(math.Ceil(lastBeat*rhythm.Division))
-	from := sort.Search(len(placed), func(i int) bool { return placed[i].Slot+placed[i].Slots >= firstSlot })
 	for i := from; i < len(placed) && placed[i].Slot <= lastSlot; i++ {
 		event := events[placed[i].Index]
 		beats := float64(placed[i].Slot) / rhythm.Division
-		x := xOf(beats)
+		x := v.xOf(beats)
 		ink := colText
 		if event.End <= now {
 			ink = colFaint
 		}
-		if event.String < 0 || event.String >= strings {
+		picked := event.ID == s.chosen
+		if event.String < 0 || event.String >= v.strings {
 			in.label(g.noteName(event.Midi), x, staffTop-17, 12, medium, colDanger, centre)
+			if picked {
+				in.outline(rect{x - 14, staffTop - 29, 28, 24}, 7, 1.5, colAccent2)
+			}
 			continue
 		}
-		y := lineOf(event.String)
+		y := v.lineOf(event.String)
 		text := fmt.Sprint(event.Fret)
 		width := in.width(text, 17, bold)
 		// a held note is written once: a line runs for as long as it lasts
-		if end := xOf(beats+float64(placed[i].Slots)/rhythm.Division) - 9; end-(x+width/2+5) > 5 {
+		if end := v.xOf(beats+float64(placed[i].Slots)/rhythm.Division) - 9; end-(x+width/2+5) > 5 {
 			hold := fade(colText, 0.28)
 			if placed[i].Index == sounding {
 				hold = fade(colAccent, 0.8)
@@ -229,7 +453,7 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 			in.round(rect{x + width/2 + 5, y - 1.5, end - (x + width/2 + 5), 3}, 1.5, hold)
 		}
 		// a note the reader is not sure of says so
-		doubtful := event.Confidence > 0 && event.Confidence < doubt
+		doubtful := event.Confidence > 0 && event.Confidence < doubt && !event.Edited
 		if placed[i].Index == sounding {
 			in.round(rect{x - width/2 - 6, y - 12, width + 12, 24}, 7, colAccent)
 			in.label(text, x, y, 17, bold, colOnLight, centre)
@@ -243,18 +467,182 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 		if doubtful {
 			in.label("?", x+width/2+5, y-9, 11, bold, colDim, centre)
 		}
+		if picked {
+			in.outline(rect{x - width/2 - 8, y - 14, width + 16, 28}, 8, 1.5, colAccent2)
+		}
 	}
-	g.drawValues(in, s, xOf, staffBottom, firstSlot, lastSlot, now, lineOf)
+	g.drawValues(in, s, v.xOf, staffBottom, firstSlot, lastSlot, now, v.lineOf)
 
 	// the line where to play
-	in.fill(rect{head - 1, staffTop - 22, 2, staffBottom - staffTop + 44}, fade(colAccent, 0.9))
-	in.polygon(colAccent, head-6, staffTop-28, head+6, staffTop-28, head, staffTop-18)
+	in.fill(rect{v.head - 1, staffTop - 22, 2, staffBottom - staffTop + 44}, fade(colAccent, 0.9))
+	in.polygon(colAccent, v.head-6, staffTop-28, v.head+6, staffTop-28, v.head, staffTop-18)
 
 	// the names of the strings, which stay put
-	for str := 0; str < strings; str++ {
-		c.label(g.noteName(s.tuning.Open[str]), r.x+gutter-14, lineOf(str), 13, medium, colDim, right)
+	for str := 0; str < v.strings; str++ {
+		c.label(g.noteName(s.tuning.Open[str]), r.x+v.gutter-14, v.lineOf(str), 13, medium, colDim, right)
 	}
-	c.label("TAB", r.x+18, r.y+22, 11, bold, colFaint, left)
+}
+
+// barControls are at the top right of the tablature: the length of the bar being played,
+// and the place of all the bar lines.
+func (g *Game) barControls(c *canvas, v tabView, s *song, now float64) {
+	r := v.r
+	x := r.x + r.w - 14
+	y := r.y + 8
+	// the bar lines can be moved by a beat, when the "one" was heard in the wrong place
+	for i, by := range []int{1, -1} {
+		x -= 34
+		if g.button(c, []string{"bars-on", "bars-back"}[i], rect{x, y, 30, 26}, []string{"›", "‹"}[i], quiet) {
+			s.shiftBars(by)
+			g.saved(s)
+		}
+		x -= 4
+	}
+	x -= 6
+	label := g.t("stanghette", "bar lines")
+	c.label(label, x, y+13, 12, regular, colFaint, right)
+	x -= c.width(label, 12, regular) + 26
+	// and one bar can have its own number of beats
+	bar := s.bar(now)
+	if bar >= 0 {
+		beats := s.pulse.BeatsIn(bar)
+		for i, by := range []int{1, -1} {
+			x -= 34
+			if g.button(c, []string{"beats-more", "beats-fewer"}[i], rect{x, y, 30, 26}, []string{"+", "−"}[i], quiet) {
+				s.setBeats(bar, beats+by)
+				g.saved(s)
+			}
+			x -= 4
+		}
+		x -= 6
+		ink := colFaint
+		if beats != s.perBar {
+			ink = colAccent2
+		}
+		c.label(fmt.Sprintf("%s %d: %d/4", g.t("battuta", "bar"), bar+1, beats), x, y+13, 12, regular, ink, right)
+	}
+}
+
+// editBar is under the staff: what can be done to the note or the chord chosen, and what
+// can always be done: add one, take the last change back.
+func (g *Game) editBar(c *canvas, v tabView, s *song, now float64) {
+	x := v.r.x + 16
+	y := v.editY
+	const h = 30
+	group := func(label string) {
+		c.label(label, x, y+h/2, 12, regular, colFaint, left)
+		x += c.width(label, 12, regular) + 8
+	}
+	press := func(id, text string, width float32, l look) bool {
+		clicked := g.button(c, id, rect{x, y, width, h}, text, l)
+		x += width + 4
+		return clicked
+	}
+	gap := func() { x += 14 }
+	changed := false
+	if i := s.find(s.chosen); i >= 0 {
+		event := s.project.Events[i]
+		group(g.t("Nota", "Note") + "  " + g.noteName(event.Midi))
+		if press("note-down", "−", 30, plain) {
+			s.transpose(i, -1)
+			changed = true
+		}
+		if press("note-up", "+", 30, plain) {
+			s.transpose(s.find(s.chosen), 1)
+			changed = true
+		}
+		gap()
+		group(g.t("Corda", "String"))
+		if press("string-down", "↓", 30, plain) {
+			s.restring(s.find(s.chosen), -1)
+			changed = true
+		}
+		if press("string-up", "↑", 30, plain) {
+			s.restring(s.find(s.chosen), 1)
+			changed = true
+		}
+		gap()
+		group(g.t("Durata", "Length"))
+		if press("shorter", "−", 30, plain) {
+			s.resize(s.find(s.chosen), -1)
+			changed = true
+		}
+		if press("longer", "+", 30, plain) {
+			s.resize(s.find(s.chosen), 1)
+			changed = true
+		}
+		gap()
+		group(g.t("Posto", "Place"))
+		if press("earlier", "‹", 30, plain) {
+			s.move(s.find(s.chosen), -1)
+			changed = true
+		}
+		if press("later", "›", 30, plain) {
+			s.move(s.find(s.chosen), 1)
+			changed = true
+		}
+		gap()
+		if press("remove-note", g.t("Elimina", "Remove"), 76, plain) {
+			s.remove(s.find(s.chosen))
+			s.chosen = ""
+			changed = true
+		}
+	} else if s.chord >= 0 && s.chord < len(s.project.Chords) {
+		chord := s.project.Chords[s.chord]
+		group(g.t("Accordo", "Chord") + "  " + chord.Name(!g.settings.English))
+		if press("root-down", "−", 30, plain) {
+			s.chordRoot(s.chord, -1)
+			changed = true
+		}
+		if press("root-up", "+", 30, plain) {
+			s.chordRoot(s.chord, 1)
+			changed = true
+		}
+		gap()
+		kind := map[string]string{"": g.t("maggiore", "major"), "m": g.t("minore", "minor"), "7": g.t("settima", "seventh"), "m7": g.t("minore settima", "minor seventh"), "maj7": g.t("settima maggiore", "major seventh")}[chord.Quality]
+		if press("chord-kind", kind+"  ›", 150, plain) {
+			s.chordKind(s.chord)
+			changed = true
+		}
+		gap()
+		if press("remove-chord", g.t("Elimina", "Remove"), 76, plain) {
+			s.chordRemove(s.chord)
+			s.chord = -1
+			changed = true
+		}
+	} else if c.painting() {
+		c.label(g.t("Clic su una nota o su un accordo per correggerli.", "Click a note or a chord to put it right."), x, y+h/2, 13, regular, colFaint, left)
+	}
+	// on the right, what is always there
+	x = v.r.x + v.r.w - 16 - 96 - 4 - 104 - 4 - 92
+	if press("add-note", g.t("+ Nota", "+ Note"), 92, plain) {
+		if id := s.add(now); id != "" {
+			s.chosen, s.chord = id, -1
+			changed = true
+		}
+	}
+	if press("add-chord", g.t("+ Accordo", "+ Chord"), 104, plain) {
+		if i := s.chordAdd(now); i >= 0 {
+			s.chord, s.chosen = i, ""
+			changed = true
+		}
+	}
+	undo := quiet
+	if len(s.history) > 0 {
+		undo = plain
+	}
+	if press("undo", g.t("Annulla", "Undo"), 96, undo) {
+		changed = s.undo()
+		if s.find(s.chosen) < 0 {
+			s.chosen = ""
+		}
+		if s.chord >= len(s.project.Chords) {
+			s.chord = -1
+		}
+	}
+	if changed {
+		g.saved(s)
+	}
 }
 
 // drawValues writes under the staff how long each note lasts, the way a tablature does:
@@ -262,8 +650,7 @@ func (g *Game) drawTab(c *canvas, r rect, s *song, now float64) {
 // a dot for a dotted value, a slur where a note runs on into the next sign.
 func (g *Game) drawValues(c *canvas, s *song, xOf func(float64) float32, staffBottom float32, firstSlot, lastSlot int, now float64, lineOf func(int) float32) {
 	symbols := s.score.Symbols
-	barSlots := s.score.BarSlots
-	slotOf := func(symbol rhythm.Symbol) int { return symbol.Bar*barSlots + symbol.Slot }
+	slotOf := func(symbol rhythm.Symbol) int { return symbol.At }
 	top, bottom := staffBottom+16, staffBottom+40
 	from := sort.Search(len(symbols), func(i int) bool { return slotOf(symbols[i]) >= firstSlot })
 	short := func(symbol rhythm.Symbol) bool { return !symbol.Rest && symbol.Value < rhythm.Division }
@@ -439,7 +826,8 @@ func (g *Game) neckCaption(c *canvas, r rect, s *song, index int, sounding bool)
 	c.label(text, r.x+r.w-28, r.y+16, 13, medium, ink, right)
 }
 
-// playControls is the row at the bottom: where in the recording, play, speed, repeat, volumes.
+// playControls is the panel at the bottom: where in the recording, play, speed, repeat,
+// volumes, and the helps for practising.
 func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 	p := s.player
 	duration := p.Duration()
@@ -465,13 +853,13 @@ func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 	// play
 	play := rect{r.x + 22, y, 52, 52}
 	if g.hit(c, "play", play) {
-		p.SetPlaying(!p.Playing())
+		g.togglePlay(s, now)
 	}
 	if c.painting() {
 		cx, cy := play.x+26, play.y+26
 		back := colAccent
 		if play.has(c.mx, c.my) {
-			back = rgb(0xff, 0xbd, 0x55)
+			back = rgb(0xff, 0xc4, 0x62)
 		}
 		c.disc(cx, cy, 26, back)
 		if p.Playing() {
@@ -501,6 +889,7 @@ func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 	speedWidth, loopWidth := float32(150), float32(210)
 	gap := max(18, min(44, (room-speedWidth-loopWidth-220)/2))
 	volumeWidth := room - speedWidth - loopWidth - 2*gap
+	chips := x
 
 	// speed
 	c.label(g.t("VELOCITÀ", "SPEED"), x, y-4, 11, bold, colFaint, left)
@@ -571,7 +960,40 @@ func (g *Game) playControls(c *canvas, r rect, s *song, now float64) {
 			g.saveSettings()
 		}
 	}
+
+	// the helps for practising, each one on or off
+	y = r.y + 124
+	x = chips
+	chip := func(id, text string, on *bool, apply func()) {
+		width := c.width(text, 14, medium) + 28
+		if g.button(c, id, rect{x, y, width, 30}, text, map[bool]look{true: chosen, false: plain}[*on]) {
+			*on = !*on
+			apply()
+			g.saveSettings()
+		}
+		x += width + 8
+	}
+	counting := g.t("Conta una battuta", "Count a bar in")
+	if p.Counting() {
+		counting = g.t("Conto…", "Counting…")
+	}
+	chip("count-in", counting, &g.settings.CountIn, func() {})
+	chip("metronome", g.t("Metronomo", "Metronome"), &g.settings.Metronome, func() { p.SetMetronome(g.settings.Metronome) })
+	chip("quicken", g.t("Più veloce a ogni giro", "Faster every time round"), &g.settings.Quicken, func() { g.applyQuicken(s) })
+	if g.settings.Quicken && !s.loopOn && c.painting() {
+		c.label(g.t("vale quando ripeti un tratto", "works while a stretch repeats"), x+4, y+15, 12, regular, colFaint, left)
+	}
 	if p.Silent && c.painting() {
-		c.label(g.t("Nessuna uscita audio: il brano scorre in silenzio.", "No sound output: the recording runs in silence."), r.x+r.w-22, r.y+r.h-14, 12, regular, colDanger, right)
+		c.label(g.t("Nessuna uscita audio: il brano scorre in silenzio.", "No sound output: the recording runs in silence."), r.x+r.w-22, r.y+r.h-16, 12, regular, colDanger, right)
+	}
+}
+
+// applyQuicken tells the player whether a repeated stretch speeds up: five in a hundred
+// every time round, up to full speed.
+func (g *Game) applyQuicken(s *song) {
+	if g.settings.Quicken {
+		s.player.SetQuicken(0.05, 1)
+	} else {
+		s.player.SetQuicken(0, 0)
 	}
 }
