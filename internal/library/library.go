@@ -129,6 +129,21 @@ func (l *Library) Save(id string, result *project.Result) error {
 	return os.Rename(temporary, final)
 }
 
+// SaveSound replaces the two tracks of a recording and leaves its project as it is. Each is
+// written beside the old one and moved over it, so a track is never left half written.
+func (l *Library) SaveSound(id string, bass, backing *audio.Buffer) error {
+	for name, track := range map[string]*audio.Buffer{"bass.wav": bass, "backing.wav": backing} {
+		path := filepath.Join(l.Dir, id, name)
+		if err := audio.WriteWAV(path+".part", track); err != nil {
+			return err
+		}
+		if err := os.Rename(path+".part", path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SaveProject stores the project again, after a change of fingering, of bars or of notes.
 func (l *Library) SaveProject(id string, p *project.Project) error {
 	if err := writeJSON(filepath.Join(l.Dir, id, "project.json"), p); err != nil {

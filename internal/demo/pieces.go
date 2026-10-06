@@ -1,9 +1,12 @@
 package demo
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"sort"
+	"sync"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
 	"github.com/MassimoDanieli/c_bass/internal/chords"
@@ -28,6 +31,41 @@ type Piece struct {
 	Line  func(bar int, c chord) []note
 	Drums func(bar int, rng *rand.Rand) []hit
 	Swing float64 // how late the second eighth of each beat falls, as a fraction of an eighth
+	// Keys is the instrument that plays the chords ("organ", "piano" or "guitar"), and Comp
+	// when it plays them in each bar.
+	Keys string
+	Comp func(bar int) []stab
+}
+
+// stab is one chord played by the keys, in beats from the start of its bar; hard is how hard
+// it is struck, from 0 to 1.
+type stab struct {
+	at, length, hard float64
+}
+
+// voicing is a chord as a keyboard player's hand takes it: every note of it, the root
+// included, gathered into one octave around the middle of the keyboard, clear of the bass.
+func voicing(c chord) []int {
+	const lowest = 52 // the E below middle C
+	notes := []int{}
+	for _, interval := range append([]int{0}, c.above...) {
+		midi := c.root + interval
+		for midi < lowest {
+			midi += 12
+		}
+		for midi >= lowest+12 {
+			midi -= 12
+		}
+		notes = append(notes, midi)
+	}
+	sort.Ints(notes)
+	return notes
+}
+
+// sounds keeps what has been played once, so that a bar that comes round again costs nothing.
+type sounds struct {
+	mono   map[string][]float32
+	stereo map[string]stereo
 }
 
 type chord struct {
@@ -68,49 +106,68 @@ func (p Piece) Render() *project.Result {
 	total := p.duration()
 	bass, rest := newTrack(total), newTrack(total)
 	rng := rand.New(rand.NewPCG(uint64(len(p.ID)), uint64(p.Beats)))
+	kept := sounds{map[string][]float32{}, map[string]stereo{}}
+	// a few takes of each drum, so that no two strokes in a row are the same sound
+	kit := map[string][][]float32{}
+	for take := 0; take < 5; take++ {
+		kit["kick"] = append(kit["kick"], kick(1, rng))
+		kit["snare"] = append(kit["snare"], snare(1, rng))
+		kit["hat"] = append(kit["hat"], hat(1, false, rng))
+		kit["open"] = append(kit["open"], hat(1, true, rng))
+		kit["rim"] = append(kit["rim"], rim(1, rng))
+		kit["ride"] = append(kit["ride"], ride(1, rng))
+		kit["shaker"] = append(kit["shaker"], shaker(1, rng))
+	}
+	pans := map[string]float64{"kick": 0, "snare": 0.08, "hat": 0.32, "open": 0.32, "rim": 0.12, "ride": -0.3, "shaker": 0.4}
 	var events []transcribe.Event
-	// the first bar is the count-in: hi-hat alone
+	// the first bar is the count-in: the sticks, four times
 	for b := 0; b < p.Beats; b++ {
-		rest.add(float64(b)*beat, hat(0.18, false, rng), 0.3)
+		rest.add(float64(b)*beat, kit["rim"][b%5], 0.12, 0.3)
 	}
 	for i, c := range p.Bars {
 		start := float64(i+1) * float64(p.Beats) * beat
 		for _, n := range p.Line(i, c) {
 			at := start + p.late(n.at)*beat
 			length := n.length * beat * 0.92
+			touch := 0.92 + 0.16*rng.Float64() // no two notes are plucked quite alike
 			if n.dead {
-				bass.add(at, Bass(n.midi, math.Min(length, 0.12), 0.22, true, rng.Uint64()), 0)
+				bass.add(at, Bass(n.midi, math.Min(length, 0.12), 0.6, true, rng.Uint64()), 0, touch)
 				continue
 			}
-			bass.add(at, Bass(n.midi, length, 0.5, false, rng.Uint64()), 0)
+			key := fmt.Sprint("bass ", n.midi, " ", int(length*1000))
+			if kept.mono[key] == nil {
+				kept.mono[key] = Bass(n.midi, length, 1, false, rng.Uint64())
+			}
+			bass.add(at, kept.mono[key], 0, touch)
 			events = append(events, transcribe.Event{Start: at, End: at + length, Midi: n.midi, Confidence: 1})
 		}
 		for _, h := range p.Drums(i, rng) {
-			at := start + p.late(h.at)*beat
-			switch h.drum {
-			case "kick":
-				rest.add(at, kick(h.level), 0)
-			case "snare":
-				rest.add(at, snare(h.level, rng), 0.1)
-			case "hat":
-				rest.add(at, hat(h.level, false, rng), 0.35)
-			case "open":
-				rest.add(at, hat(h.level, true, rng), 0.35)
-			case "rim":
-				rest.add(at, rim(h.level), 0.1)
-			case "ride":
-				rest.add(at, ride(h.level, rng), -0.3)
+			// a drummer is never exactly on the grid, nor exactly as loud twice
+			at := start + p.late(h.at)*beat + (rng.Float64()-0.5)*0.006
+			takes := kit[h.drum]
+			rest.add(at, takes[rng.IntN(len(takes))], pans[h.drum], h.level*(0.88+0.24*rng.Float64()))
+		}
+		notes := voicing(c)
+		for _, hit := range p.Comp(i) {
+			at := start + p.late(hit.at)*beat
+			length := hit.length * beat
+			key := fmt.Sprint(p.Keys, notes, int(length*1000), int(hit.hard*100))
+			if _, ok := kept.stereo[key]; !ok {
+				switch p.Keys {
+				case "organ":
+					kept.stereo[key] = organ(notes, length, 1, 0.8+1.5*hit.hard, 6.4, 0)
+				case "guitar":
+					kept.stereo[key] = guitar(notes, length, 1)
+				default:
+					kept.stereo[key] = piano(notes, length, 1, hit.hard, 0)
+				}
 			}
+			rest.addStereo(at, kept.stereo[key], keysLevel[p.Keys]*(0.75+0.5*hit.hard))
 		}
-		// the pad plays the chord on the first beat of the bar, and again halfway
-		voicing := make([]int, len(c.above))
-		for k, interval := range c.above {
-			voicing[k] = c.root + 12 + interval
-		}
-		half := float64(p.Beats) * beat / 2
-		rest.add(start, Pad(voicing, half*1.1, 0.07), -0.4)
-		rest.add(start+half, Pad(voicing, half*1.1, 0.055), -0.4)
 	}
+	rest.room(0.9)
+	bass.level(0.16, 0.8)
+	rest.level(0.13, 0.85)
 	// the chords, as written
 	var harmony []chords.Chord
 	for i, c := range p.Bars {
@@ -140,18 +197,48 @@ func (p Piece) Render() *project.Result {
 func Install(lib *library.Library) ([]string, error) {
 	var ids []string
 	for _, p := range Pieces {
-		if !lib.Has(p.ID) {
-			if err := lib.Save(p.ID, p.Render()); err != nil {
-				return ids, err
-			}
-		}
 		ids = append(ids, p.ID)
 	}
-	return ids, nil
+	return ids, each(func(p Piece) error {
+		if lib.Has(p.ID) {
+			return nil
+		}
+		return lib.Save(p.ID, p.Render())
+	})
+}
+
+// Refresh plays again, with the instruments as they are now, the pieces still in a library.
+// Only the sound is replaced: the part, with whatever was corrected in it, stays as it is.
+func Refresh(lib *library.Library) error {
+	return each(func(p Piece) error {
+		if !lib.Has(p.ID) {
+			return nil // taken out of the list: it stays out
+		}
+		r := p.Render()
+		return lib.SaveSound(p.ID, r.Bass, r.Backing)
+	})
+}
+
+// each does something with every piece, all at once: playing one takes a second or so.
+func each(do func(Piece) error) error {
+	failures := make([]error, len(Pieces))
+	var wait sync.WaitGroup
+	for i, p := range Pieces {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			failures[i] = do(p)
+		}()
+	}
+	wait.Wait()
+	return errors.Join(failures...)
 }
 
 // Buffers of the two tracks, for the build's trial of the window.
 func Buffers(r *project.Result) (*audio.Buffer, *audio.Buffer) { return r.Bass, r.Backing }
+
+// keysLevel is how loud each instrument sits against the drums.
+var keysLevel = map[string]float64{"organ": 0.3, "piano": 0.2, "guitar": 0.42}
 
 // --- the music ---
 
@@ -190,10 +277,17 @@ var Pieces = []Piece{
 		Drums: func(bar int, rng *rand.Rand) []hit {
 			out := []hit{{0, "kick", 0.55}, {1, "snare", 0.4}, {2, "kick", 0.55}, {2.5, "kick", 0.35}, {3, "snare", 0.4}}
 			for b := 0.0; b < 4; b += 0.5 {
-				out = append(out, hit{b, "ride", 0.14})
+				level := 0.16
+				if math.Mod(b, 1) != 0 {
+					level = 0.09 // the shuffle: the skipped note is the quiet one
+				}
+				out = append(out, hit{b, "ride", level})
 			}
 			return out
 		},
+		// the organ holds the chord, and leans on it again on the "and" of two
+		Keys: "organ",
+		Comp: func(bar int) []stab { return []stab{{0, 1.5, 0.35}, {1.5, 2.5, 0.55}} },
 	},
 	{
 		ID: "demo-funk", Title: "Funk", Key: "E", BPM: 104, Beats: 4,
@@ -222,6 +316,14 @@ var Pieces = []Piece{
 			out = append(out, hit{3.5, "open", 0.12})
 			return out
 		},
+		// short stabs on the electric piano, off the beat
+		Keys: "piano",
+		Comp: func(bar int) []stab {
+			if bar%2 == 0 {
+				return []stab{{0, 0.4, 0.8}, {1.5, 0.3, 0.6}, {2.75, 0.75, 0.9}}
+			}
+			return []stab{{0.5, 0.3, 0.6}, {1.75, 0.6, 0.85}, {3, 0.4, 0.7}}
+		},
 	},
 	{
 		ID: "demo-bossa", Title: "Bossa nova", Key: "A", BPM: 132, Beats: 4,
@@ -242,9 +344,21 @@ var Pieces = []Piece{
 				out = append(out, hit{1, "rim", 0.3}, hit{2, "rim", 0.3})
 			}
 			for b := 0.0; b < 4; b += 0.5 {
-				out = append(out, hit{b, "hat", 0.1})
+				level := 0.16
+				if math.Mod(b, 1) != 0 {
+					level = 0.26 // the shaker pushes on the off-beats
+				}
+				out = append(out, hit{b, "shaker", level})
 			}
 			return out
+		},
+		// the guitar plays the bossa figure, two bars long
+		Keys: "guitar",
+		Comp: func(bar int) []stab {
+			if bar%2 == 0 {
+				return []stab{{0, 1.4, 0.6}, {1.5, 1.4, 0.5}, {3, 1.4, 0.6}}
+			}
+			return []stab{{0.5, 1.4, 0.5}, {2, 1.4, 0.6}, {3.5, 0.9, 0.45}}
 		},
 	},
 	{
@@ -274,9 +388,21 @@ var Pieces = []Piece{
 		Drums: func(bar int, rng *rand.Rand) []hit {
 			out := []hit{{1, "hat", 0.22}, {3, "hat", 0.22}, {0, "kick", 0.2}, {2, "kick", 0.2}}
 			for _, b := range []float64{0, 1, 1.5, 2, 3, 3.5} {
-				out = append(out, hit{b, "ride", 0.16})
+				level := 0.2
+				if math.Mod(b, 1) != 0 {
+					level = 0.11
+				}
+				out = append(out, hit{b, "ride", level})
 			}
 			return out
+		},
+		// the piano comps as a jazz pianist's left hand does: on one and on the "and" of two
+		Keys: "piano",
+		Comp: func(bar int) []stab {
+			if bar%2 == 0 {
+				return []stab{{0, 1.3, 0.45}, {1.5, 1.6, 0.35}}
+			}
+			return []stab{{1, 1.3, 0.4}, {2.5, 1.4, 0.35}}
 		},
 	},
 	{
@@ -306,6 +432,9 @@ var Pieces = []Piece{
 			}
 			return out
 		},
+		// the organ, with some grit, holds each chord and pushes it again halfway
+		Keys: "organ",
+		Comp: func(bar int) []stab { return []stab{{0, 2, 0.8}, {2, 2, 0.7}} },
 	},
 }
 
