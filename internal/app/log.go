@@ -14,7 +14,7 @@ import (
 // step took, and what went wrong, with where in the program it happened. It stays on the
 // computer; it is there to be read, or sent along, when something does not work.
 
-const issues = "https://github.com/MassimoDanieli/C_bass/issues/new"
+const issues = "https://github.com/MassimoDanieli/C_bass/issues/new/choose"
 
 var diary struct {
 	sync.Mutex
