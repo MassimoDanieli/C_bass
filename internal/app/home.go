@@ -41,10 +41,13 @@ func (g *Game) homeScreen(c *canvas) {
 	drop := rect{x, 128, width, 170}
 	c.round(drop, 16, colPanel)
 	c.outline(drop.inset(0.5), 16, 1, colLine)
-	c.label(g.t("Trascina qui un brano", "Drop a recording here"), g.w/2, drop.y+52, 22, medium, colText, centre)
-	c.label(g.t("MP3, WAV, FLAC o M4A. La prima volta serve circa un minuto: poi si riapre subito.", "MP3, WAV, FLAC or M4A. The first time takes about a minute; after that it opens at once."), g.w/2, drop.y+84, 14, regular, colDim, centre)
-	if g.button(c, "choose", rect{g.w/2 - 90, drop.y + 110, 180, 38}, g.t("Scegli un file…", "Choose a file…"), primary) {
+	c.label(g.t("Trascina qui i brani", "Drop recordings here"), g.w/2, drop.y+52, 22, medium, colText, centre)
+	c.label(c.fit(g.t("Uno, tanti o una cartella intera: MP3, WAV, FLAC o M4A. Circa un minuto a brano, la prima volta.", "One, many or a whole folder: MP3, WAV, FLAC or M4A. About a minute each, the first time."), 14, regular, width-30), g.w/2, drop.y+84, 14, regular, colDim, centre)
+	if g.button(c, "choose", rect{g.w/2 - 186, drop.y + 110, 180, 38}, g.t("Scegli i file…", "Choose files…"), primary) {
 		g.askForFile()
+	}
+	if g.button(c, "choose-folder", rect{g.w/2 + 6, drop.y + 110, 180, 38}, g.t("Scegli una cartella…", "Choose a folder…"), plain) {
+		g.askForFolder()
 	}
 
 	top := drop.y + drop.h + 34
@@ -128,6 +131,9 @@ func (g *Game) workingScreen(c *canvas) {
 	width := min(g.w-80, 620)
 	x := (g.w - width) / 2
 	y := g.h/2 - 170
+	if g.several() {
+		c.label(fmt.Sprintf(g.t("Brano %d di %d", "Recording %d of %d"), g.lot.total-len(g.queue), g.lot.total), x, y-30, 13, medium, colAccent, left)
+	}
 	c.label(c.fit(j.title, 24, bold, width), x, y, 24, bold, colText, left)
 	if err != nil {
 		message := err.Error()
@@ -218,7 +224,13 @@ func (g *Game) workingScreen(c *canvas) {
 		row += 36
 	}
 	c.label(g.t("Puoi lasciare la finestra aperta e fare altro.", "You can leave the window open and do something else."), x, row+16, 13, regular, colFaint, left)
-	if g.button(c, "give-up", rect{x, row + 44, 140, 38}, g.t("Annulla", "Cancel"), plain) || (c.in != nil && g.pressed(ebiten.KeyEscape)) {
+	stop, wide := g.t("Annulla", "Cancel"), float32(140)
+	if g.several() {
+		stop, wide = g.t("Annulla tutti", "Cancel them all"), 170
+		c.label(g.t("Puoi trascinarne altri: si mettono in coda.", "You can drop more: they wait their turn."), x, row+36, 13, regular, colFaint, left)
+		row += 20
+	}
+	if g.button(c, "give-up", rect{x, row + 44, wide, 38}, stop, plain) || (c.in != nil && g.pressed(ebiten.KeyEscape)) {
 		g.goHome()
 	}
 }

@@ -49,10 +49,11 @@ func main() {
 func usage() {
 	fmt.Print(`cbass ` + version + ` — from a recording to a bass part
 
-  cbass [options] <recording.mp3|.wav>
+  cbass [options] <recording.mp3|.wav|folder> [more...]
 
 Separates the bass from the recording, reads its notes, finds the bars, and writes
-next to the recording (or in the folder given with -o):
+next to the recording (or in the folder given with -o). Given several recordings, or a
+folder, it does them one after the other:
 
   <name>.cbass.json    notes, bars and fingering
   <name>.tab.txt       the tablature
@@ -88,15 +89,79 @@ func analyseFlags() (*flag.FlagSet, *settings) {
 	return flags, s
 }
 
+// recordings lists what there is to analyse at some paths: the files themselves, and the
+// audio files in the folders, folders within folders included.
+func recordings(paths []string) ([]string, error) {
+	var found []string
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			found = append(found, path)
+			continue
+		}
+		err = filepath.WalkDir(path, func(inside string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			hidden := strings.HasPrefix(entry.Name(), ".") && inside != path
+			if entry.IsDir() {
+				if hidden {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !hidden && audio.Readable(entry.Name()) {
+				found = append(found, inside)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return found, nil
+}
+
 func analyse(args []string) error {
 	flags, s := analyseFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 1 {
-		return fmt.Errorf("give one recording to analyse")
+	if flags.NArg() == 0 {
+		return fmt.Errorf("give a recording to analyse, or several, or a folder of them")
 	}
-	path := flags.Arg(0)
+	paths, err := recordings(flags.Args())
+	if err != nil {
+		return err
+	}
+	switch {
+	case len(paths) == 0:
+		return fmt.Errorf("no audio files were found there")
+	case len(paths) == 1:
+		return analyseOne(paths[0], s)
+	case s.bass != "":
+		return fmt.Errorf("-bass goes with one recording, not with %d", len(paths))
+	}
+	// several: one that fails does not stop the others
+	var failed []string
+	for i, path := range paths {
+		fmt.Printf("\n[%d of %d] %s\n", i+1, len(paths), path)
+		if err := analyseOne(path, s); err != nil {
+			fmt.Fprintf(os.Stderr, "cbass: %s: %v\n", filepath.Base(path), err)
+			failed = append(failed, filepath.Base(path))
+		}
+	}
+	fmt.Printf("\n%d of %d done\n", len(paths)-len(failed), len(paths))
+	if len(failed) > 0 {
+		return fmt.Errorf("%d did not work: %s", len(failed), strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+func analyseOne(path string, s *settings) error {
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	out := s.out
 	if out == "" {
