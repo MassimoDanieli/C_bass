@@ -77,6 +77,7 @@ type Game struct {
 	notice      string
 	noticed     time.Time
 	good        bool   // the notice is good news, not a complaint
+	stays       bool   // the notice waits for a click: whoever it is for may be away
 	menu        bool   // the list of ways to save the part is open
 	guide       string // "help" or "about" when one of those pages is open over the screen
 	guideScroll float32
@@ -84,7 +85,9 @@ type Game struct {
 	awake       int // frames still to paint: an idle window is left as it is
 	frames      int
 	seen        [4]float32
-	choose      chan string // the answer of the file dialog
+	choose      chan []pending // the answer of the file dialog: nil if nothing was chosen
+	queue       []pending      // recordings waiting to be worked out
+	lot         batch          // what became of the ones given together
 
 	scale float32
 	w, h  float32
@@ -205,17 +208,17 @@ func (g *Game) t(italian, english string) string {
 
 // say shows a complaint at the foot of the window for a few seconds.
 func (g *Game) say(message string) {
-	g.notice, g.noticed, g.good = message, time.Now(), false
+	g.notice, g.noticed, g.good, g.stays = message, time.Now(), false, false
 }
 
 // tell shows good news the same way.
 func (g *Game) tell(message string) {
-	g.notice, g.noticed, g.good = message, time.Now(), true
+	g.notice, g.noticed, g.good, g.stays = message, time.Now(), true, false
 }
 
 // showing says whether a notice is on the screen.
 func (g *Game) showing() bool {
-	return g.notice != "" && time.Since(g.noticed) <= noticeTime
+	return g.notice != "" && (g.stays || time.Since(g.noticed) <= noticeTime)
 }
 
 const noticeTime = 7 * time.Second
@@ -330,6 +333,9 @@ func (g *Game) pressed(key ebiten.Key) bool {
 }
 
 func (g *Game) drawNotice(c *canvas) {
+	if g.stays && c.in != nil && c.in.pressed {
+		g.stays, g.notice = false, ""
+	}
 	if !g.showing() {
 		return
 	}
@@ -419,42 +425,173 @@ func (g *Game) takeShot(target *ebiten.Image) {
 
 // ---- opening a recording ----
 
-// takeDrop opens a recording dropped on the window.
+// pending is a recording waiting for its turn: its name, and how to read it when the turn comes.
+type pending struct {
+	name string
+	read func() ([]byte, error)
+}
+
+// batch counts what became of several recordings given at once.
+type batch struct {
+	total, ready, known int
+	failed              []string // the names of the ones that did not work
+}
+
+// recordingsIn lists the audio files of a file system, folders within folders included, in
+// the order of their names.
+func recordingsIn(files fs.FS) []pending {
+	var found []pending
+	fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // a folder that cannot be read is passed over
+		}
+		if entry.IsDir() {
+			if path != "." && strings.HasPrefix(entry.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if audio.Readable(entry.Name()) && !strings.HasPrefix(entry.Name(), ".") {
+			found = append(found, pending{entry.Name(), func() ([]byte, error) { return fs.ReadFile(files, path) }})
+		}
+		return nil
+	})
+	return found
+}
+
+// recordingsAt lists the audio files at some paths: the files themselves, and what is in the folders.
+func recordingsAt(paths []string) []pending {
+	var found []pending
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		switch {
+		case err != nil:
+			continue
+		case info.IsDir():
+			found = append(found, recordingsIn(os.DirFS(path))...)
+		case audio.Readable(path):
+			found = append(found, pending{filepath.Base(path), func() ([]byte, error) { return os.ReadFile(path) }})
+		}
+	}
+	return found
+}
+
+// takeDrop takes the recordings dropped on the window: one, several, or folders of them.
 func (g *Game) takeDrop() {
 	dropped := ebiten.DroppedFiles()
 	if dropped == nil {
 		return
 	}
-	entries, err := fs.ReadDir(dropped, ".")
-	if err != nil || len(entries) == 0 {
+	if entries, err := fs.ReadDir(dropped, "."); err != nil || len(entries) == 0 {
+		return
+	}
+	g.enqueue(recordingsIn(dropped))
+}
+
+// enqueue starts work on some recordings, one after the other. Given while others are being
+// worked out, they wait their turn after those.
+func (g *Game) enqueue(found []pending) {
+	if len(found) == 0 {
+		g.say(g.t("Servono file audio: MP3, WAV, FLAC, M4A.", "An audio file is needed: MP3, WAV, FLAC, M4A."))
 		return
 	}
 	if g.screen == working && g.job != nil && !g.job.failed() {
+		if g.lot.total == 0 {
+			return // a recording from the list is being opened: that is not a queue to join
+		}
+		g.queue = append(g.queue, found...)
+		g.lot.total += len(found)
 		return
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !audio.Readable(entry.Name()) {
-			continue
-		}
-		data, err := fs.ReadFile(dropped, entry.Name())
-		if err != nil {
-			g.say(err.Error())
-			return
-		}
-		g.open(entry.Name(), data)
-		return
-	}
-	g.say(g.t("Servono file audio: MP3, WAV, FLAC, M4A.", "An audio file is needed: MP3, WAV, FLAC, M4A."))
+	g.queue, g.lot = found, batch{total: len(found)}
+	g.next()
 }
 
-func (g *Game) askForFile() {
+// several says whether more than one recording was given: then none is opened at the end,
+// and the list says what became of each.
+func (g *Game) several() bool { return g.lot.total > 1 }
+
+// next starts on the first recording still waiting, or goes back to the list when none is.
+func (g *Game) next() {
+	for len(g.queue) > 0 {
+		item := g.queue[0]
+		g.queue = g.queue[1:]
+		data, err := item.read()
+		if err != nil {
+			note("%q: cannot be read: %v", item.name, err)
+			if !g.several() {
+				g.say(err.Error())
+				return
+			}
+			g.lot.failed = append(g.lot.failed, item.name)
+			continue
+		}
+		if g.several() && g.lib.Has(library.ID(data)) {
+			g.lot.known++ // worked out before: it is in the list already
+			continue
+		}
+		g.open(item.name, data)
+		return
+	}
+	if !g.several() {
+		return
+	}
+	lot := g.lot
+	g.goHome()
+	g.scroll = 0
+	// one or several, in the two languages
+	count := func(n int, one, many, single, plural string) string {
+		if n == 1 {
+			return "1 " + g.t(one, single)
+		}
+		return fmt.Sprintf("%d %s", n, g.t(many, plural))
+	}
+	var parts []string
+	if lot.ready > 0 {
+		parts = append(parts, count(lot.ready, "brano pronto", "brani pronti", "recording ready", "recordings ready"))
+	}
+	if lot.known > 0 {
+		parts = append(parts, count(lot.known, "già nella lista", "già nella lista", "already in the list", "already in the list"))
+	}
+	if len(lot.failed) > 0 {
+		parts = append(parts, count(len(lot.failed), "non riuscito", "non riusciti", "did not work", "did not work")+": "+strings.Join(lot.failed, ", "))
+	}
+	if message := strings.Join(parts, "  ·  "); len(lot.failed) > 0 {
+		g.say(message)
+	} else {
+		g.tell(message)
+	}
+	g.stays = true // a long queue is left to itself: what became of it waits to be read
+}
+
+func (g *Game) askForFile() { g.ask(false) }
+
+func (g *Game) askForFolder() { g.ask(true) }
+
+// ask shows the system's panel for choosing recordings, or a folder of them.
+func (g *Game) ask(folder bool) {
 	if g.choose != nil {
 		return
 	}
-	g.choose = make(chan string, 1)
+	g.choose = make(chan []pending, 1)
 	answer := g.choose
-	prompt := g.t("Scegli un brano", "Choose a recording")
-	go func() { answer <- chooseFile(prompt) }()
+	if folder {
+		prompt := g.t("Scegli una cartella di brani", "Choose a folder of recordings")
+		go func() {
+			if path := chooseFolder(prompt); path != "" {
+				found := recordingsAt([]string{path})
+				if found == nil {
+					found = []pending{} // a folder was chosen, with nothing to read in it
+				}
+				answer <- found
+				return
+			}
+			answer <- nil
+		}()
+		return
+	}
+	prompt := g.t("Scegli uno o più brani", "Choose one or more recordings")
+	go func() { answer <- recordingsAt(chooseFiles(prompt)) }()
 }
 
 func (g *Game) takeChoice() {
@@ -462,22 +599,17 @@ func (g *Game) takeChoice() {
 		return
 	}
 	select {
-	case path := <-g.choose:
+	case found := <-g.choose:
 		g.choose = nil
-		if path != "" {
-			g.openPath(path)
+		if found != nil {
+			g.enqueue(found)
 		}
 	default:
 	}
 }
 
 func (g *Game) openPath(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		g.say(err.Error())
-		return
-	}
-	g.open(filepath.Base(path), data)
+	g.enqueue(recordingsAt([]string{path}))
 }
 
 // open starts work on a recording: straight to playing if it is already in the library.
@@ -579,11 +711,23 @@ func (g *Game) takeJob() {
 	if g.job == nil || g.screen != working {
 		return
 	}
+	if g.several() && g.job.failed() { // one of several: noted, and on to the next
+		g.lot.failed = append(g.lot.failed, g.job.title)
+		g.job = nil
+		g.next()
+		return
+	}
 	s := g.job.result()
 	if s == nil {
 		return
 	}
 	g.job = nil
+	if g.several() {
+		s.player.Close()
+		g.lot.ready++
+		g.next()
+		return
+	}
 	g.song = s
 	if s.project.Tuning != g.settings.Tuning {
 		s.retune(g.settings.Tuning)
@@ -602,6 +746,7 @@ func (g *Game) goHome() {
 		g.job.stop.Store(true) // whatever it was doing, nobody is waiting for it any more
 	}
 	g.job, g.menu = nil, false
+	g.queue, g.lot = nil, batch{}
 	g.entries = g.lib.List()
 	g.screen = home
 }
