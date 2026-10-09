@@ -9,7 +9,9 @@ import (
 	"image/png"
 	"io/fs"
 	"math"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
 	"github.com/MassimoDanieli/c_bass/internal/demo"
+	"github.com/MassimoDanieli/c_bass/internal/fetch"
 	"github.com/MassimoDanieli/c_bass/internal/fretboard"
 	"github.com/MassimoDanieli/c_bass/internal/icon"
 	"github.com/MassimoDanieli/c_bass/internal/library"
@@ -133,9 +136,12 @@ func Run(version string) error {
 		g.job = &job{title: "Giro di prova", started: time.Now(), stage: stageSeparating, done: 12, total: 31, downloaded: true}
 		g.screen = working
 	} else if open := os.Getenv("CBASS_OPEN"); open != "" {
-		if lib.Has(open) {
+		switch {
+		case lib.Has(open):
 			g.openEntry(open)
-		} else {
+		case strings.HasPrefix(open, "http://") || strings.HasPrefix(open, "https://"):
+			g.enqueue([]pending{{name: open, link: open}})
+		default:
 			g.openPath(open)
 		}
 	}
@@ -429,6 +435,7 @@ func (g *Game) takeShot(target *ebiten.Image) {
 type pending struct {
 	name string
 	read func() ([]byte, error)
+	link string // a recording to fetch from the web, instead
 }
 
 // batch counts what became of several recordings given at once.
@@ -452,7 +459,7 @@ func recordingsIn(files fs.FS) []pending {
 			return nil
 		}
 		if audio.Readable(entry.Name()) && !strings.HasPrefix(entry.Name(), ".") {
-			found = append(found, pending{entry.Name(), func() ([]byte, error) { return fs.ReadFile(files, path) }})
+			found = append(found, pending{name: entry.Name(), read: func() ([]byte, error) { return fs.ReadFile(files, path) }})
 		}
 		return nil
 	})
@@ -470,7 +477,7 @@ func recordingsAt(paths []string) []pending {
 		case info.IsDir():
 			found = append(found, recordingsIn(os.DirFS(path))...)
 		case audio.Readable(path):
-			found = append(found, pending{filepath.Base(path), func() ([]byte, error) { return os.ReadFile(path) }})
+			found = append(found, pending{name: filepath.Base(path), read: func() ([]byte, error) { return os.ReadFile(path) }})
 		}
 	}
 	return found
@@ -516,6 +523,10 @@ func (g *Game) next() {
 	for len(g.queue) > 0 {
 		item := g.queue[0]
 		g.queue = g.queue[1:]
+		if item.link != "" {
+			g.openLink(item.link)
+			return
+		}
 		data, err := item.read()
 		if err != nil {
 			note("%q: cannot be read: %v", item.name, err)
@@ -566,6 +577,24 @@ func (g *Game) next() {
 
 func (g *Game) askForFile() { g.ask(false) }
 
+// askForLink asks for the address of an audio file on the web.
+func (g *Game) askForLink() {
+	if g.choose != nil {
+		return
+	}
+	g.choose = make(chan []pending, 1)
+	answer := g.choose
+	prompt := g.t("L'indirizzo di un file audio (MP3, WAV, FLAC, M4A):", "The address of an audio file (MP3, WAV, FLAC, M4A):")
+	go func() {
+		text := strings.TrimSpace(askText(prompt))
+		if text == "" {
+			answer <- nil
+			return
+		}
+		answer <- []pending{{name: text, link: text}}
+	}()
+}
+
 func (g *Game) askForFolder() { g.ask(true) }
 
 // ask shows the system's panel for choosing recordings, or a folder of them.
@@ -614,48 +643,72 @@ func (g *Game) openPath(path string) {
 
 // open starts work on a recording: straight to playing if it is already in the library.
 func (g *Game) open(name string, data []byte) {
-	title := strings.TrimSuffix(name, filepath.Ext(name))
-	j := &job{title: title, started: time.Now()}
+	j := &job{title: strings.TrimSuffix(name, filepath.Ext(name)), started: time.Now()}
 	g.startJob(j)
-	tuning, low := g.settings.Tuning, g.settings.Low
+	go j.run(func() (*song, error) { return g.work(j, name, data) })
+}
+
+// openLink fetches the recording a link leads to, then works on it as on a file.
+func (g *Game) openLink(link string) {
+	title := link
+	if parsed, err := url.Parse(link); err == nil && parsed.Path != "" {
+		title = strings.TrimSuffix(path.Base(parsed.Path), path.Ext(parsed.Path))
+	}
+	j := &job{title: title, started: time.Now(), link: true}
+	g.startJob(j)
 	go j.run(func() (*song, error) {
-		id := library.ID(data)
-		if g.lib.Has(id) {
-			return g.load(j, id)
-		}
-		j.at(stageReading, "", 0, 0)
-		recording, err := audio.DecodeBytes(data, name)
+		j.at(stageFetching, "", 0, 0)
+		data, name, err := fetch.Get(link, func(done, total int64) { j.at(stageFetching, "", done, total) })
 		if err != nil {
 			return nil, err
 		}
-		mix := project.Prepare(recording)
-		data = nil
-		result, err := project.Analyse(mix, title, project.Options{Version: g.version, Tuning: tuning, Low: low, Stop: j.stop.Load}, func(step project.Step) {
-			switch step.Stage {
-			case project.Downloading:
-				j.at(stageDownloading, step.Detail, step.Done, step.Total)
-			case project.Separating:
-				j.at(stageSeparating, "", step.Done, step.Total)
-			case project.Separated, project.ReadingNotes:
-				j.at(stageNotes, "", step.Done, step.Total)
-			case project.NotesRead:
-				j.at(stageBeat, "", 0, 0)
-			case project.BeatFound:
-				j.at(stageChords, "", 0, 0)
-			}
-		})
-		if err != nil {
-			return nil, err
-		}
-		if j.stop.Load() { // given up while the notes were being read: nothing is kept
-			return nil, project.ErrStopped
-		}
-		j.at(stageSaving, "", 0, 0)
-		if err := g.lib.Save(id, result); err != nil {
-			return nil, err
-		}
-		return newSong(id, result), nil
+		j.mu.Lock()
+		j.title = strings.TrimSuffix(name, filepath.Ext(name))
+		j.mu.Unlock()
+		return g.work(j, name, data)
 	})
+}
+
+// work works a recording out, away from the window, and keeps the result in the library.
+func (g *Game) work(j *job, name string, data []byte) (*song, error) {
+	title := strings.TrimSuffix(name, filepath.Ext(name))
+	tuning, low := g.settings.Tuning, g.settings.Low
+	id := library.ID(data)
+	if g.lib.Has(id) {
+		return g.load(j, id)
+	}
+	j.at(stageReading, "", 0, 0)
+	recording, err := audio.DecodeBytes(data, name)
+	if err != nil {
+		return nil, err
+	}
+	mix := project.Prepare(recording)
+	data = nil
+	result, err := project.Analyse(mix, title, project.Options{Version: g.version, Tuning: tuning, Low: low, Stop: j.stop.Load}, func(step project.Step) {
+		switch step.Stage {
+		case project.Downloading:
+			j.at(stageDownloading, step.Detail, step.Done, step.Total)
+		case project.Separating:
+			j.at(stageSeparating, "", step.Done, step.Total)
+		case project.Separated, project.ReadingNotes:
+			j.at(stageNotes, "", step.Done, step.Total)
+		case project.NotesRead:
+			j.at(stageBeat, "", 0, 0)
+		case project.BeatFound:
+			j.at(stageChords, "", 0, 0)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	if j.stop.Load() { // given up while the notes were being read: nothing is kept
+		return nil, project.ErrStopped
+	}
+	j.at(stageSaving, "", 0, 0)
+	if err := g.lib.Save(id, result); err != nil {
+		return nil, err
+	}
+	return newSong(id, result), nil
 }
 
 func (g *Game) openEntry(id string) {
@@ -756,7 +809,8 @@ func (g *Game) goHome() {
 type stage int
 
 const (
-	stageReading stage = iota
+	stageFetching stage = iota
+	stageReading
 	stageDownloading
 	stageSeparating
 	stageNotes
@@ -770,6 +824,7 @@ const (
 type job struct {
 	mu          sync.Mutex
 	title       string
+	link        bool // fetched from the web first
 	started     time.Time
 	stage       stage
 	detail      string

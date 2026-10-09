@@ -28,3 +28,13 @@ POSIX path of (choose folder with prompt "` + strings.ReplaceAll(prompt, `"`, ""
 	}
 	return ""
 }
+
+// askText asks for a line of text in a panel of the system; "" if nothing was given.
+func askText(prompt string) string {
+	script := `activate
+text returned of (display dialog "` + strings.ReplaceAll(prompt, `"`, "") + `" default answer "" with title "C_bass")`
+	if found := lines(exec.Command("osascript", "-e", script).Output()); len(found) > 0 {
+		return found[0]
+	}
+	return ""
+}

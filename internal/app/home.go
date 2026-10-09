@@ -1,9 +1,11 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/MassimoDanieli/c_bass/internal/fetch"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -42,12 +44,15 @@ func (g *Game) homeScreen(c *canvas) {
 	c.round(drop, 16, colPanel)
 	c.outline(drop.inset(0.5), 16, 1, colLine)
 	c.label(g.t("Trascina qui i brani", "Drop recordings here"), g.w/2, drop.y+52, 22, medium, colText, centre)
-	c.label(c.fit(g.t("Uno, tanti o una cartella intera: MP3, WAV, FLAC o M4A. Circa un minuto a brano, la prima volta.", "One, many or a whole folder: MP3, WAV, FLAC or M4A. About a minute each, the first time."), 14, regular, width-30), g.w/2, drop.y+84, 14, regular, colDim, centre)
-	if g.button(c, "choose", rect{g.w/2 - 186, drop.y + 110, 180, 38}, g.t("Scegli i file…", "Choose files…"), primary) {
+	c.label(c.fit(g.t("Uno, tanti, una cartella o il link a un file: MP3, WAV, FLAC o M4A. Circa un minuto a brano.", "One, many, a folder or a link to a file: MP3, WAV, FLAC or M4A. About a minute each."), 14, regular, width-30), g.w/2, drop.y+84, 14, regular, colDim, centre)
+	if g.button(c, "choose", rect{g.w/2 - 276, drop.y + 110, 180, 38}, g.t("Scegli i file…", "Choose files…"), primary) {
 		g.askForFile()
 	}
-	if g.button(c, "choose-folder", rect{g.w/2 + 6, drop.y + 110, 180, 38}, g.t("Scegli una cartella…", "Choose a folder…"), plain) {
+	if g.button(c, "choose-folder", rect{g.w/2 - 90, drop.y + 110, 180, 38}, g.t("Scegli una cartella…", "Choose a folder…"), plain) {
 		g.askForFolder()
+	}
+	if g.button(c, "choose-link", rect{g.w/2 + 96, drop.y + 110, 180, 38}, g.t("Da un link…", "From a link…"), plain) {
+		g.askForLink()
 	}
 
 	top := drop.y + drop.h + 34
@@ -145,6 +150,16 @@ func (g *Game) workingScreen(c *canvas) {
 			headline = g.t("Per questo tipo di file serve ffmpeg: con MP3, WAV e FLAC non serve altro.", "This kind of file needs ffmpeg: MP3, WAV and FLAC need nothing else.")
 		case strings.Contains(message, "can be read"), strings.HasPrefix(message, "mp3:"), strings.HasPrefix(message, "wav:"), strings.HasPrefix(message, "flac:"):
 			headline = g.t("Non riesco a leggere questo file audio.", "This audio file cannot be read.")
+		case errors.Is(err, fetch.ErrVideoSite):
+			headline = g.t("Un sito di video non dà il file audio: scarica il brano per conto tuo e trascinalo qui.", "A video site gives no audio file: download the recording yourself and drop it here.")
+		case errors.Is(err, fetch.ErrNotAudio):
+			headline = g.t("Il link porta a una pagina, non a un file audio.", "The link leads to a page, not to an audio file.")
+		case errors.Is(err, fetch.ErrNotALink):
+			headline = g.t("Non è un link: deve cominciare con http:// o https://.", "That is not a link: it should start with http:// or https://.")
+		case errors.Is(err, fetch.ErrTooLarge):
+			headline = g.t("Il file è troppo grande.", "The file is too large.")
+		case errors.Is(err, fetch.ErrNotReached):
+			headline = g.t("Non riesco a scaricare il file: controlla il link e la connessione.", "The file could not be fetched: check the link and the connection.")
 		case strings.Contains(message, "no notes were found"):
 			headline = g.t("In questo brano non ho trovato note di basso.", "No bass notes were found in this recording.")
 		}
@@ -183,6 +198,7 @@ func (g *Game) workingScreen(c *canvas) {
 		show bool
 	}
 	lines := []line{
+		{stageFetching, g.t("Scarico il brano dal link", "Fetching the recording from the link"), j.link},
 		{stageReading, g.t("Leggo il brano", "Reading the recording"), true},
 		{stageDownloading, g.t("Scarico il modello (solo la prima volta)", "Downloading the model (first time only)"), downloaded},
 		{stageSeparating, g.t("Separo il basso dal resto", "Separating the bass from the rest"), true},
@@ -214,6 +230,9 @@ func (g *Game) workingScreen(c *canvas) {
 			note := fmt.Sprintf("%d%%", int(fraction*100))
 			if at == stageDownloading {
 				note = fmt.Sprintf("%s: %d / %d MB", detail, done>>20, total>>20)
+			}
+			if at == stageFetching {
+				note = fmt.Sprintf("%d / %d MB", done>>20, total>>20)
 			}
 			c.label(note, x+width, row, 13, regular, colDim, right)
 			bar := rect{x + 28, row + 17, width - 28, 4}

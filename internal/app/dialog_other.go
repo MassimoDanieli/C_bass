@@ -38,3 +38,15 @@ func chooseFolder(prompt string) string {
 	}
 	return ""
 }
+
+// askText asks for a line of text; "" if nothing was given.
+func askText(prompt string) string {
+	found := helper([][]string{
+		{"zenity", "--entry", "--title", "C_bass", "--text", prompt},
+		{"kdialog", "--title", "C_bass", "--inputbox", prompt},
+	})
+	if len(found) > 0 {
+		return found[0]
+	}
+	return ""
+}
