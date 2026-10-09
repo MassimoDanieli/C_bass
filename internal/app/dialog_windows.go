@@ -36,3 +36,14 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }`)
 	}
 	return ""
 }
+
+// askText asks for a line of text in a window of the system; "" if nothing was given.
+func askText(prompt string) string {
+	found := powershell(`Add-Type -AssemblyName Microsoft.VisualBasic
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Write-Output ([Microsoft.VisualBasic.Interaction]::InputBox('` + strings.ReplaceAll(prompt, "'", "") + `', 'C_bass', ''))`)
+	if len(found) > 0 {
+		return found[0]
+	}
+	return ""
+}

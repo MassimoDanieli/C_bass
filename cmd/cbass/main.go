@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/MassimoDanieli/c_bass/internal/audio"
+	"github.com/MassimoDanieli/c_bass/internal/fetch"
 	"github.com/MassimoDanieli/c_bass/internal/fretboard"
 	"github.com/MassimoDanieli/c_bass/internal/project"
 	"github.com/MassimoDanieli/c_bass/internal/tab"
@@ -49,7 +50,7 @@ func main() {
 func usage() {
 	fmt.Print(`cbass ` + version + ` — from a recording to a bass part
 
-  cbass [options] <recording.mp3|.wav|folder> [more...]
+  cbass [options] <recording.mp3|.wav|folder|https://link/to/file.mp3> [more...]
 
 Separates the bass from the recording, reads its notes, finds the bars, and writes
 next to the recording (or in the folder given with -o). Given several recordings, or a
@@ -94,6 +95,10 @@ func analyseFlags() (*flag.FlagSet, *settings) {
 func recordings(paths []string) ([]string, error) {
 	var found []string
 	for _, path := range paths {
+		if isLink(path) {
+			found = append(found, path)
+			continue
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, err
@@ -161,7 +166,46 @@ func analyse(args []string) error {
 	return nil
 }
 
+func isLink(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
+}
+
+// fetched brings in the recording a link leads to, and keeps it in a folder.
+func fetched(link, folder string) (string, error) {
+	shown := int64(-1)
+	data, name, err := fetch.Get(link, func(done, total int64) {
+		if done>>20 == shown {
+			return
+		}
+		shown = done >> 20
+		if total > 0 {
+			fmt.Printf("\r        fetching: %d of %d MB", done>>20, total>>20)
+		} else {
+			fmt.Printf("\r        fetching: %d MB", done>>20)
+		}
+	})
+	fmt.Println()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(folder, filepath.Base(name))
+	return path, os.WriteFile(path, data, 0o644)
+}
+
 func analyseOne(path string, s *settings) error {
+	if isLink(path) {
+		folder := s.out
+		if folder == "" {
+			folder = "."
+		}
+		var err error
+		if path, err = fetched(path, folder); err != nil {
+			return err
+		}
+	}
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	out := s.out
 	if out == "" {
