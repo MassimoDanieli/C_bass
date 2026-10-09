@@ -124,7 +124,7 @@ La finestra tiene un registro accanto alle impostazioni (`log.txt`): ogni passo 
 
 ## Cosa scarica
 
-La prima volta, applicazione e riga di comando scaricano due cose, che restano nella cache dell'utente: la libreria ONNX Runtime (circa 30 MB, dal rilascio ufficiale su GitHub) e il modello Demucs (174 MB, dal sito di Manico). Entrambe sono verificate con il loro hash. I brani non vengono mai mandati in rete; l'unica altra richiesta è quella, descritta sopra, che all'avvio chiede a GitHub se c'è una versione nuova.
+La prima volta, applicazione e riga di comando scaricano due cose, che restano nella cache dell'utente: la libreria ONNX Runtime (circa 30 MB, dal rilascio ufficiale su GitHub) e il modello Demucs (174 MB, dal sito di Manico). Entrambe sono verificate con il loro hash. I brani non vengono mai mandati in rete; le altre richieste sono quella, descritta sopra, che all'avvio chiede a GitHub se c'è una versione nuova, e lo scaricamento di un brano quando gliene dai il link.
 
 ## Come è fatto
 
@@ -180,7 +180,7 @@ Il codice è GPL-3.0-or-later. Il modello che separa il basso non fa parte di qu
 
 **Command line.** `cbass -stems track.mp3` writes, beside the track, `track.cbass.json` (notes, bars, fingering), `track.tab.txt` (the tablature with bars and note values) and, with `-stems`, the track without its bass and the bass alone. `cbass help` lists the options.
 
-**Downloads.** On first use ONNX Runtime (about 30 MB, from the official GitHub release) and the Demucs model (174 MB, from Manico's site) are fetched into the user's cache, each checked against its hash. The recordings are never sent anywhere. At start the program asks GitHub which versions have been published, to say when there is a newer one: one request for a public page, with nothing about the computer or the recordings, which the About page turns off. "Help" (or F1, or the "?" while playing) lists controls and keys; "About" gives version, licence, where the parts of the program come from and what stays on the computer.
+**Downloads.** On first use ONNX Runtime (about 30 MB, from the official GitHub release) and the Demucs model (174 MB, from Manico's site) are fetched into the user's cache, each checked against its hash. The recordings are never sent anywhere. At start the program asks GitHub which versions have been published, to say when there is a newer one: one request for a public page, with nothing about the computer or the recordings, which the About page turns off; and a recording is fetched when you give its link. "Help" (or F1, or the "?" while playing) lists controls and keys; "About" gives version, licence, where the parts of the program come from and what stays on the computer.
 
 **Build.** Go 1.26 and a C compiler; on Linux the window also needs the X11, OpenGL and ALSA headers listed in `.github/workflows/build.yml`. `go test ./...`, then `go build -o cbass ./cmd/cbass` and `go build -o cbass-app ./cmd/cbass-app`. Every push is built for macOS arm64, Windows x64 and Linux x64, and on each machine the whole program, model included, is tried on a recording made on the spot; then the application is built, opened on one of its built-in pieces with a picture of the window kept, and packed (disk image, Inno Setup installer from `packaging/C_bass.iss`, `.deb` and archive from `packaging/linux.sh`); each package is tried there: installed, started, removed. Run by hand with a version name, the build gathers the packages in a draft release.
 
