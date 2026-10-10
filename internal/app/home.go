@@ -32,13 +32,7 @@ func (g *Game) homeScreen(c *canvas) {
 		g.guide, g.guideScroll = "help", 0
 	}
 	// a newer version, when there is one
-	if found, page, _, _ := g.latest.get(); found != "" {
-		text := g.t("È uscita la versione ", "Version ") + found + g.t(": scarica", " is out: download")
-		w := c.width(text, 14, medium) + 28
-		if g.button(c, "update", rect{x + width - w, 88, w, 28}, text, chosen) {
-			show(page)
-		}
-	}
+	g.updateButton(c, "update", func(w float32) rect { return rect{x + width - w, 88, w, 28} }, chosen)
 
 	drop := rect{x, 128, width, 170}
 	c.round(drop, 16, colPanel)

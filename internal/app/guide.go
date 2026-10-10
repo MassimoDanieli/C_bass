@@ -235,7 +235,7 @@ func (g *Game) aboutPage(whole, c *canvas, body rect) float32 {
 	})
 
 	heading(t("Aggiornamenti", "Updates"))
-	found, page, asked, failed := g.latest.get()
+	found, _, asked, failed := g.latest.get()
 	switch {
 	case g.settings.NoUpdateCheck:
 		paragraph(t("Il controllo delle nuove versioni è spento.", "The check for new versions is off."), colDim)
@@ -250,17 +250,16 @@ func (g *Game) aboutPage(whole, c *canvas, body rect) float32 {
 	}
 	paragraph(t("All'avvio il programma chiede a GitHub quali versioni sono state pubblicate. È una sola richiesta a una pagina pubblica: non porta con sé niente del computer, dei brani o di te.",
 		"At start the program asks GitHub which versions have been published. It is one request for a public page: nothing about the computer, the recordings or you goes with it."), colFaint)
+	paragraph(t("Con «aggiorna» il programma scarica la versione nuova da GitHub, la controlla contro la sua impronta, la mette al posto di questa e si riapre. Dove non può (installato dal gestore dei pacchetti, o aperto da un'immagine disco) apre la pagina da cui scaricarla.",
+		"With \"update\" the program fetches the new version from GitHub, checks it against its fingerprint, puts it in place of this one and opens again. Where it cannot (installed by the package manager, or opened from a disk image) it opens the page to download it from."), colFaint)
 	toggle := t("Spegni il controllo", "Turn the check off")
 	if g.settings.NoUpdateCheck {
 		toggle = t("Accendi il controllo", "Turn the check on")
 	}
 	bx := body.x
 	if found != "" {
-		w := c.width(t("Scarica", "Download"), 14, medium) + 36
-		if g.button(c, "about-download", rect{bx, y, w, 32}, t("Scarica", "Download"), primary) && body.has(whole.mx, whole.my) {
-			show(page)
-		}
-		bx += w + 8
+		start := bx
+		g.updateButton(c, "about-download", func(w float32) rect { bx = start + w + 8; return rect{start, y, w, 32} }, primary)
 	}
 	if g.button(c, "about-updates", rect{bx, y, c.width(toggle, 14, medium) + 28, 32}, toggle, plain) && body.has(whole.mx, whole.my) {
 		g.settings.NoUpdateCheck = !g.settings.NoUpdateCheck
