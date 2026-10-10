@@ -128,6 +128,52 @@ jobs:
           iconutil -c icns -o "$app/Resources/C_bass.icns" C_bass.iconset
           codesign --force --deep --sign - C_bass.app
           codesign --verify --deep --strict C_bass.app
+      # Signed with the maintainer's Developer ID and notarized by Apple, so that macOS opens it
+      # without a warning. Without the secrets (a fork, say) the application stays signed ad hoc.
+      - name: Sign and notarize the application (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
+            echo "::warning title=macOS::not signed with a Developer ID: the secrets are not set"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          pass=$(openssl rand -hex 16)
+          printf %s "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$pass" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" | grep "Developer ID Application" | head -1 | awk '{print $2}')
+          if [ -z "$identity" ]; then echo "::error title=macOS::the certificate is not a Developer ID Application one"; exit 1; fi
+          echo "MACOS_IDENTITY=$identity" >> "$GITHUB_ENV"
+          codesign --force --options runtime --timestamp --entitlements packaging/C_bass.entitlements --sign "$identity" C_bass.app
+          codesign --verify --deep --strict --verbose=2 C_bass.app
+          ditto -c -k --keepParent C_bass.app notarize.zip
+          notarize() { # $1: the file to send; fails, with Apple's reasons, unless it is accepted
+            result=$(xcrun notarytool submit "$1" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait --timeout 40m --output-format json)
+            echo "$result"
+            if [ "$(echo "$result" | jq -r .status)" != "Accepted" ]; then
+              xcrun notarytool log "$(echo "$result" | jq -r .id)" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" || true
+              echo "::error title=macOS::Apple did not accept $1"
+              return 1
+            fi
+          }
+          echo "$(declare -f notarize)" > "$RUNNER_TEMP/notarize.sh"
+          notarize notarize.zip
+          rm notarize.zip
+          xcrun stapler staple C_bass.app
+          spctl --assess --type execute --verbose=2 C_bass.app
+          echo "::notice title=macOS::signed with a Developer ID and notarized"
       - name: Build the application (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -178,6 +224,30 @@ jobs:
             exit 1
           fi
 
+      # Signed with the hardened runtime, the application may only load what macOS allows: the
+      # separation, which loads ONNX Runtime, is tried for real in the signed application.
+      - name: Work a recording out in the signed application (macOS)
+        if: runner.os == 'macOS' && env.MACOS_IDENTITY != ''
+        env:
+          CBASS_LIBRARY: ${{ runner.temp }}/library-signed
+          CBASS_NO_AUDIO: '1'
+          CBASS_NO_SEED: '1'
+        run: |
+          export CBASS_MODEL="$PWD/model/htdemucs.onnx" CBASS_OPEN="$PWD/trial.wav" CBASS_SHOT="$PWD/signed.png"
+          log="$HOME/Library/Application Support/C_bass/log.txt"
+          C_bass.app/Contents/MacOS/C_bass > signed.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 400); do
+            if ! kill -0 $pid 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if kill -0 $pid 2>/dev/null; then kill $pid; fi
+          tail -6 "$log" || true
+          if ! grep -q '"trial": ready after' "$log"; then
+            echo "::error title=macOS::the signed application did not work the recording out: $(grep trial "$log" | tail -2 | tr '\n' ' ')"
+            exit 1
+          fi
+
       # What people download: a disk image for macOS, an installer for Windows, a package and an
       # archive for Linux. Each is tried here: installed, started, and taken away again.
       - name: Pack the application (macOS)
@@ -197,6 +267,18 @@ jobs:
           test -L mounted/Applications
           codesign --verify --deep --strict mounted/C_bass.app
           hdiutil detach mounted
+          # the disk image too, when the application was signed: signed, notarized, stapled
+          if [ -n "${MACOS_IDENTITY:-}" ]; then
+            codesign --force --timestamp --sign "$MACOS_IDENTITY" C_bass-macos-arm64.dmg
+            . "$RUNNER_TEMP/notarize.sh"
+            notarize C_bass-macos-arm64.dmg
+            xcrun stapler staple C_bass-macos-arm64.dmg
+            spctl --assess --type open --context context:primary-signature --verbose=2 C_bass-macos-arm64.dmg
+          fi
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
       - name: Pack the application (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

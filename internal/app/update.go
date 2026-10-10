@@ -56,16 +56,21 @@ func (l *latest) busy() bool {
 	return l.updating || l.restart != nil
 }
 
-// selfFile is the file this program can update itself from, if it can.
+// selfFile is the file this program can update itself from, if it can. Whether it can is
+// worked out once, the first time a newer version is shown: it means looking into the folder
+// the program is in, which macOS asks permission for when that is Downloads or Documents.
 func (g *Game) selfFile() (selfupdate.Asset, bool) {
-	exe, err := os.Executable()
-	if err != nil {
-		return selfupdate.Asset{}, false
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	plan := selfupdate.Plan(exe)
+	g.planOnce.Do(func() {
+		exe, err := os.Executable()
+		if err != nil {
+			return
+		}
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		g.plan = selfupdate.Plan(exe)
+	})
+	plan := g.plan
 	g.latest.Lock()
 	assets, problem := g.latest.assets, g.latest.problem
 	g.latest.Unlock()

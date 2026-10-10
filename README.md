@@ -52,7 +52,7 @@ Dalla pagina [Releases](https://github.com/MassimoDanieli/C_bass/releases):
 
 | | |
 |---|---|
-| **macOS** (Apple Silicon) | `C_bass-macos-arm64.dmg`: si apre e si trascina C_bass in Applicazioni |
+| **macOS** (Apple Silicon) | `C_bass-macos-arm64.dmg`: si apre e si trascina C_bass in Applicazioni. È firmato con un Developer ID e notarizzato da Apple: macOS lo apre senza avvisi |
 | **Windows** (64 bit) | `C_bass-windows-x64-setup.exe`: l'installer, solo per il proprio utente, senza password di amministratore. `C_bass-windows-x64-portable.exe` parte senza installare niente |
 | **Linux** (64 bit) | `C_bass-linux-x64.deb` per Debian, Ubuntu, Mint: `sudo apt install ./C_bass-linux-x64.deb`. `C_bass-linux-x64.tar.gz` per le altre: si scompatta e si lancia `./install.sh`, che installa nella propria home (`--remove` per toglierlo) |
 

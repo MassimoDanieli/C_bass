@@ -91,6 +91,8 @@ type Game struct {
 	awake       int // frames still to paint: an idle window is left as it is
 	frames      int
 	seen        [4]float32
+	plan        string         // the file this program can update itself from; "" if it cannot
+	planOnce    sync.Once      // the plan is made once
 	choose      chan []pending // the answer of the file dialog: nil if nothing was chosen
 	queue       []pending      // recordings waiting to be worked out
 	lot         batch          // what became of the ones given together
@@ -130,10 +132,10 @@ func Run(version string) error {
 	g.entries = lib.List()
 	g.shot = os.Getenv("CBASS_SHOT")
 	g.guide = os.Getenv("CBASS_GUIDE") // for a picture of those pages
-	if exe, err := os.Executable(); err == nil {
-		selfupdate.Cleanup(exe) // the version an update replaced, if one did
-	}
 	if from := g.settings.UpdatedFrom; from != "" {
+		if exe, err := os.Executable(); err == nil {
+			selfupdate.Cleanup(exe) // the version the update replaced
+		}
 		if from != version {
 			g.tell(g.t("Aggiornato: dalla versione ", "Updated: from version ") + from + g.t(" alla ", " to ") + version)
 		}
