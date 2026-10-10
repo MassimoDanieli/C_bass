@@ -52,3 +52,11 @@ Name: "{autodesktop}\C_bass"; Filename: "{app}\C_bass.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\C_bass.exe"; Description: "{cm:LaunchProgram,C_bass}"; Flags: nowait postinstall skipifsilent
+; started again after an update made from inside the program, which runs this quietly
+Filename: "{app}\C_bass.exe"; Flags: nowait; Check: Relaunch
+
+[Code]
+function Relaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|no}') = 'yes';
+end;

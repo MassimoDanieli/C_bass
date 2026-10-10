@@ -30,6 +30,7 @@ import (
 	"github.com/MassimoDanieli/c_bass/internal/icon"
 	"github.com/MassimoDanieli/c_bass/internal/library"
 	"github.com/MassimoDanieli/c_bass/internal/project"
+	"github.com/MassimoDanieli/c_bass/internal/selfupdate"
 )
 
 type screen int
@@ -59,6 +60,8 @@ type settings struct {
 	Low       bool `json:"lowPosition"`
 	// NoUpdateCheck turns off the question asked of GitHub at start: is there a newer version?
 	NoUpdateCheck bool `json:"noUpdateCheck"`
+	// UpdatedFrom is the version the program updated itself from, until the new one has said so.
+	UpdatedFrom string `json:"updatedFrom,omitempty"`
 }
 
 // Game is the whole program, as the window library wants it.
@@ -127,6 +130,16 @@ func Run(version string) error {
 	g.entries = lib.List()
 	g.shot = os.Getenv("CBASS_SHOT")
 	g.guide = os.Getenv("CBASS_GUIDE") // for a picture of those pages
+	if exe, err := os.Executable(); err == nil {
+		selfupdate.Cleanup(exe) // the version an update replaced, if one did
+	}
+	if from := g.settings.UpdatedFrom; from != "" {
+		if from != version {
+			g.tell(g.t("Aggiornato: dalla versione ", "Updated: from version ") + from + g.t(" alla ", " to ") + version)
+		}
+		g.settings.UpdatedFrom = ""
+		g.saveSettings()
+	}
 	g.lookForUpdate()
 	if pretend := os.Getenv("CBASS_LATEST"); pretend != "" { // for a picture of the notice
 		g.latest.version, g.latest.page, g.latest.asked = pretend, homePage+"/releases", true
@@ -238,7 +251,7 @@ func (g *Game) stir(x, y, wheel float32) bool {
 	switch {
 	case moved, wheel != 0, len(g.keys) > 0, g.in.pressed, g.in.released, g.in.down:
 		return true
-	case g.shot != "", g.job != nil, g.choose != nil:
+	case g.shot != "", g.job != nil, g.choose != nil, g.latest.busy():
 		return true
 	case g.notice != "" && time.Since(g.noticed) <= noticeTime+time.Second:
 		return true
@@ -283,6 +296,7 @@ func (g *Game) Update() error {
 	g.takeDrop()
 	g.takeChoice()
 	g.takeJob()
+	g.takeUpdate()
 
 	c := &canvas{in: &g.in, mx: x, my: y, scale: g.scale, w: g.w, h: g.h}
 	g.frame(c)

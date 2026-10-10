@@ -32,17 +32,17 @@ func TestWhichVersionIsNewer(t *testing.T) {
 // that are not versions left out.
 func TestTheNewestVersionListed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`[{"tag_name":"v0.6.1-beta.1","html_url":"a"},{"tag_name":"v0.7.0-beta.1","html_url":"b"},
+		w.Write([]byte(`[{"tag_name":"v0.6.1-beta.1","html_url":"a"},{"tag_name":"v0.7.0-beta.1","html_url":"b","assets":[{"name":"C_bass-macos-arm64.zip","browser_download_url":"z","digest":"sha256:ab"}]},
 			{"tag_name":"v0.9.0","html_url":"c","draft":true},{"tag_name":"nightly","html_url":"d"},{"tag_name":"v0.6.0-beta.1","html_url":"e"}]`))
 	}))
 	defer server.Close()
-	version, page, err := newest(server.URL)
-	if err != nil || version != "0.7.0-beta.1" || page != "b" {
-		t.Errorf("got %q at %q, %v", version, page, err)
+	version, page, assets, err := newest(server.URL)
+	if err != nil || version != "0.7.0-beta.1" || page != "b" || len(assets) != 1 || assets[0].URL != "z" || assets[0].Digest != "sha256:ab" {
+		t.Errorf("got %q at %q with %v, %v", version, page, assets, err)
 	}
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer down.Close()
-	if _, _, err := newest(down.URL); err == nil {
+	if _, _, _, err := newest(down.URL); err == nil {
 		t.Error("a server that fails gave no error")
 	}
 }
