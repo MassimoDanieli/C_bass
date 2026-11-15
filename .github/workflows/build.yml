@@ -21,8 +21,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: What the window needs to be built on Linux
@@ -31,8 +31,8 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
-      - name: Test
-        run: go test ./...
+      - name: Test with the race detector (playback and analysis run on their own goroutines)
+        run: go test -race ./...
       # The window, opened for real on a made-up recording, and a picture of it kept.
       - name: Open the window
         env:
@@ -43,10 +43,22 @@ jobs:
           go build -o cbass-app ./cmd/cbass-app
           CBASS_OPEN=demo-blues CBASS_SHOT_AT=9.3 CBASS_SHOT=window-linux.png timeout 120 xvfb-run -a -s "-screen 0 1280x860x24" ./cbass-app
           test -s window-linux.png
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: window-linux
           path: window-linux.png
+
+  # Known vulnerabilities in the Go toolchain and in the modules C_bass actually calls.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: What the window needs to be built on Linux
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
 
   build:
     needs: test
@@ -54,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             name: cbass-macos-arm64
             binary: cbass
             app: C_bass-macos-arm64
@@ -71,8 +83,8 @@ jobs:
     env:
       CGO_ENABLED: '1'
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       # The version is the name given to a draft release, or else the commit.
@@ -88,7 +100,7 @@ jobs:
         shell: bash
         run: go build -trimpath -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }}" -o "${{ matrix.binary }}" ./cmd/cbass
       - name: Keep the model between runs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: model
           key: htdemucs-da9e5101
@@ -110,7 +122,7 @@ jobs:
           test -s out/trial.bass.wav && test -s out/trial.no-bass.wav && test -s out/trial.cbass.json
           go run ./tools/testtone -check out/trial.cbass.json
           echo "::notice title=${{ matrix.name }}::26 seconds of audio analysed in ${took}s ($(grep -c . run.log) steps): $(grep 'read .* notes' run.log | sed 's/^ *//')"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.binary }}
@@ -243,28 +255,28 @@ jobs:
           test -s installed-archive.png
           HOME="$PWD/home" sh home/C_bass-linux-x64/install.sh --remove
           test ! -e home/.local/bin/c-bass
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'macOS'
         with:
           name: ${{ matrix.app }}
           path: |
             C_bass-macos-arm64.dmg
             C_bass-macos-arm64.zip
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'Windows'
         with:
           name: ${{ matrix.app }}
           path: |
             C_bass-windows-x64-setup.exe
             C_bass.exe
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'Linux'
         with:
           name: ${{ matrix.app }}
           path: |
             dist/C_bass-linux-x64.deb
             dist/C_bass-linux-x64.tar.gz
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: matrix.app
         with:
           name: window-${{ matrix.name }}
@@ -279,7 +291,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           path: built
       - name: Draft the release
